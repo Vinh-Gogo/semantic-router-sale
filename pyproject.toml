@@ -1,0 +1,12 @@
+[project]
+name = "semantic-router-sales"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain-openai>=1.1.12",
+    "openai>=2.30.0",
+    "semantic-router<1.0",
+    "transformers>=5.5.0",
+]

@@ -5,6 +5,7 @@
 > - *Docker enpoints url*.
 > - *Data source*.
 > - *GPU or CPU*.
+> - *Environment `uv`*
 
 ## Quick Test
 
