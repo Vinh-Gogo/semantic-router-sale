@@ -1,4 +1,4 @@
-# F&B ANALYTICS - Semantic Router
+# SALE ANALYTICS - Semantic Router
 
 ## Instructions install
 
