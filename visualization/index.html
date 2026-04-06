@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi Dataset Similarity Tester</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gauge-circle { transition: stroke-dashoffset 0.5s ease, stroke 0.3s ease; }
+        .match-item { transition: all 0.3s ease; }
+        .scroll-list { max-height: 320px; overflow-y: auto; }
+        .scroll-list::-webkit-scrollbar { width: 6px; }
+        .scroll-list::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-6 max-w-7xl">
+        <h1 class="text-4xl font-bold text-center mb-6 bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 bg-clip-text text-transparent">
+            🔍 3 Dataset Similarity Tester
+        </h1>
+
+        <div class="mb-6">
+            <textarea 
+                id="inputText" 
+                class="w-full h-24 bg-gray-800 border border-gray-700 rounded-xl p-4 text-xl focus:border-blue-500 focus:outline-none transition-all resize-none"
+                placeholder="Gõ bất kỳ cái gì vào đây... hệ thống sẽ tính real-time đồng thời 3 score"
+            ></textarea>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            
+            <!-- Gauge 1: Bình Thường -->
+            <div class="bg-gray-800 rounded-xl p-4">
+                <h3 class="text-lg font-semibold mb-2 text-center text-green-400">✅ Bình Thường</h3>
+                <div class="relative w-28 h-28 mx-auto">
+                    <svg viewBox="0 0 200 200" class="w-full h-full">
+                        <circle cx="100" cy="100" r="80" fill="none" stroke="#374151" stroke-width="14" />
+                        <circle id="gauge1" cx="100" cy="100" r="80" fill="none" stroke="#22c55e" stroke-width="14" 
+                                stroke-dasharray="502.65" stroke-dashoffset="502.65" stroke-linecap="round"
+                                transform="rotate(-90 100 100)" class="gauge-circle" />
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div id="score1" class="text-2xl font-bold">0%</div>
+                    </div>
+                </div>
+                <div id="list1" class="scroll-list mt-3 space-y-1 text-xs"></div>
+            </div>
+
+            <!-- Gauge 2: Crawl Data -->
+            <div class="bg-gray-800 rounded-xl p-4">
+                <h3 class="text-lg font-semibold mb-2 text-center text-blue-400">🤖 Crawl Data</h3>
+                <div class="relative w-28 h-28 mx-auto">
+                    <svg viewBox="0 0 200 200" class="w-full h-full">
+                        <circle cx="100" cy="100" r="80" fill="none" stroke="#374151" stroke-width="14" />
+                        <circle id="gauge2" cx="100" cy="100" r="80" fill="none" stroke="#3b82f6" stroke-width="14" 
+                                stroke-dasharray="502.65" stroke-dashoffset="502.65" stroke-linecap="round"
+                                transform="rotate(-90 100 100)" class="gauge-circle" />
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div id="score2" class="text-2xl font-bold">0%</div>
+                    </div>
+                </div>
+                <div id="list2" class="scroll-list mt-3 space-y-1 text-xs"></div>
+            </div>
+
+            <!-- Gauge 3: Tào Lao -->
+            <div class="bg-gray-800 rounded-xl p-4">
+                <h3 class="text-lg font-semibold mb-2 text-center text-red-400">🤪 Tào Lao</h3>
+                <div class="relative w-28 h-28 mx-auto">
+                    <svg viewBox="0 0 200 200" class="w-full h-full">
+                        <circle cx="100" cy="100" r="80" fill="none" stroke="#374151" stroke-width="14" />
+                        <circle id="gauge3" cx="100" cy="100" r="80" fill="none" stroke="#ef4444" stroke-width="14" 
+                                stroke-dasharray="502.65" stroke-dashoffset="502.65" stroke-linecap="round"
+                                transform="rotate(-90 100 100)" class="gauge-circle" />
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div id="score3" class="text-2xl font-bold">0%</div>
+                    </div>
+                </div>
+                <div id="list3" class="scroll-list mt-3 space-y-1 text-xs"></div>
+            </div>
+
+            <!-- Gauge 4: Lời chào -->
+            <div class="bg-gray-800 rounded-xl p-4">
+                <h3 class="text-lg font-semibold mb-2 text-center text-purple-400">👋 Lời Chào</h3>
+                <div class="relative w-28 h-28 mx-auto">
+                    <svg viewBox="0 0 200 200" class="w-full h-full">
+                        <circle cx="100" cy="100" r="80" fill="none" stroke="#374151" stroke-width="14" />
+                        <circle id="gauge4" cx="100" cy="100" r="80" fill="none" stroke="#a855f7" stroke-width="14" 
+                                stroke-dasharray="502.65" stroke-dashoffset="502.65" stroke-linecap="round"
+                                transform="rotate(-90 100 100)" class="gauge-circle" />
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div id="score4" class="text-2xl font-bold">0%</div>
+                    </div>
+                </div>
+                <div id="list4" class="scroll-list mt-3 space-y-1 text-xs"></div>
+            </div>
+
+        </div>
+
+        <footer class="text-center text-gray-500 text-sm">
+            <p>Real-time WebSocket | Input embedding tính 1 lần, compare 3 dataset đồng thời | Top 10 matches mỗi nhóm</p>
+            <p class="mt-2 text-yellow-400 font-semibold">👋 hello</p>
+        </footer>
+    </div>
+
+    <script>
+        let ws = null;
+        let debounceTimer = null;
+        const maxArc = 502.65;
+        const colors = ['#22c55e', '#3b82f6', '#ef4444', '#a855f7'];
+
+        function initWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws/calculate`);
+            
+            ws.onopen = () => console.log("✅ WebSocket connected");
+            ws.onclose = () => setTimeout(initWebSocket, 2000);
+            ws.onerror = (e) => console.error("WebSocket error", e);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                updateGauge('gauge1', 'score1', data.binh_thuong);
+                updateGauge('gauge2', 'score2', data.crawl_data);
+                updateGauge('gauge3', 'score3', data.tao_lao);
+                updateGauge('gauge4', 'score4', data.hello);
+
+                updateList('list1', data.top.binh_thuong, colors[0]);
+                updateList('list2', data.top.crawl_data, colors[1]);
+                updateList('list3', data.top.tao_lao, colors[2]);
+                updateList('list4', data.top.hello, colors[3]);
+            };
+        }
+
+        function updateGauge(gaugeId, scoreId, value) {
+            const gauge = document.getElementById(gaugeId);
+            const score = document.getElementById(scoreId);
+            
+            const offset = maxArc - (value / 100) * maxArc;
+            gauge.style.strokeDashoffset = offset;
+            score.textContent = `${value}%`;
+        }
+
+        function updateList(listId, items, color) {
+            const container = document.getElementById(listId);
+            container.innerHTML = items.map(item => `
+                <div class="match-item bg-gray-700 rounded-lg p-2 flex justify-between items-center">
+                    <div class="truncate mr-2">${item.text}</div>
+                    <div class="font-bold whitespace-nowrap" style="color: ${color}">${item.score}%</div>
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('inputText').addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(e.target.value);
+                }
+            }, 250);
+        });
+
+        document.addEventListener('DOMContentLoaded', initWebSocket);
+    </script>
+</body>
+</html>
