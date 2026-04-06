@@ -17,7 +17,7 @@ def read_jsonl(file_path: str, deduplicate: bool = True):
     
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
+            line = line.strip().lower()
             if line:
                 try:
                     record = json.loads(line)
@@ -29,7 +29,14 @@ def read_jsonl(file_path: str, deduplicate: bool = True):
                             continue
                         seen.add(msg)
                     
-                    data.append(record)
+                    # Chỉ giữ lại id và message
+                    clean_record = {}
+                    if 'id' in record:
+                        clean_record['id'] = record['id']
+                    if 'message' in record:
+                        clean_record['message'] = record['message']
+                    
+                    data.append(clean_record)
                 except json.JSONDecodeError:
                     continue
     
@@ -37,9 +44,6 @@ def read_jsonl(file_path: str, deduplicate: bool = True):
         print(f"ℹ️ Đã loại bỏ {duplicates_removed} dòng tin nhắn trùng lặp trong {file_path}")
     
     return data
-
-
-
 
 def read_tao_lao_data(file_path: str = "data/tao-lao.jsonl"):
     """Đọc file dữ liệu tao lao định dạng jsonl (backward compatible)"""
@@ -58,7 +62,7 @@ def fix_ids_and_save(file_path: str = "data/tao-lao.jsonl"):
     # Ghi lại file
     with open(file_path, "w", encoding="utf-8") as f:
         for record in data:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record.lower(), ensure_ascii=False) + "\n")
     
     print(f"✅ Đã cập nhật {len(data)} bản ghi, id tuần tự từ 1 -> {len(data)}")
 

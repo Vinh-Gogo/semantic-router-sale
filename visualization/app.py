@@ -36,11 +36,11 @@ datasets = {
         "data": [],
         "embeddings": None
     },
-    "hello": {
-        "path": "data/hello.jsonl",
-        "data": [],
-        "embeddings": None
-    }
+    # "hello": {
+    #     "path": "data/hello.jsonl",
+    #     "data": [],
+    #     "embeddings": None
+    # }
 }
 
 
@@ -73,12 +73,12 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             text = await websocket.receive_text()
             
-            if not text or len(text.strip()) < 1:
+            if not text or len(text.strip().split()) < 3:
                 await websocket.send_json({
                     "tao_lao": 0,
                     "crawl_data": 0,
                     "binh_thuong": 0,
-                    "hello": 0,
+                    # "hello": 0,s
                 })
                 continue
             
@@ -94,11 +94,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 cache_norms = ds['embeddings'] / np.linalg.norm(ds['embeddings'], axis=1, keepdims=True)
                 similarities = np.dot(cache_norms, input_norm)
                 
-                # Lấy top 10 gần nhất
-                top_indices = np.argsort(similarities)[-10:][::-1]
+                # Lấy top 5 gần nhất
+                top_indices = np.argsort(similarities)[-5:][::-1]
                 top_scores = similarities[top_indices]
                 
-                # Tính điểm trung bình CHỈ từ top 10, không dùng toàn bộ dataset
+                # Tính điểm trung bình CHỈ từ top 5, không dùng toàn bộ dataset
                 result[name] = round(float(np.mean(top_scores)) * 100, 2)
                 
                 top_matches[name] = [

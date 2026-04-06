@@ -1,12 +1,15 @@
 [project]
-name = "semantic-router-sales"
+name = "semantic-router-sale"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.135.3",
     "langchain-openai>=1.1.12",
     "openai>=2.30.0",
+    "python-multipart>=0.0.24",
     "semantic-router<1.0",
     "transformers>=5.5.0",
+    "uvicorn[standard]>=0.43.0",
 ]
