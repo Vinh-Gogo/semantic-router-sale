@@ -1,10 +1,10 @@
 # F&B ANALYTICS - Semantic Router
 
-## Installation
+## Instructions install
 
-> Docker enpoints url
-> Data source
-> GPU or CPU
+> - *Docker enpoints url*.
+> - *Data source*.
+> - *GPU or CPU*.
 
 ## Quick Test
 
