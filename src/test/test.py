@@ -1,11 +1,23 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import json
 import numpy as np
+import sqlite3
+import sqlite_vec
+import requests
 
 from langchain_openai import OpenAIEmbeddings
+from langchain_core.documents import Document
 from pydantic import SecretStr
 from dotenv import load_dotenv
 load_dotenv()
+
+# Fix import trực tiếp thay vì import module để tránh lỗi
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'utils'))
+from vector_store import normalize_vnese, normalize_record, SQLiteVec
 
 # base_url from env
 base_url = os.getenv("OPENAI_BASE_URL_EMBED")
@@ -25,9 +37,49 @@ embeddings = OpenAIEmbeddings(
     # tiktoken_enabled=False,
 )
 
-# Cache embedding dataset (chỉ khởi tạo 1 lần)
-_cached_embeddings = None
-_cached_file_mtime = None
+# Cache vector store SQLiteVec
+_vector_stores = {}
+
+def init_vector_store(name: str, file_path: str) -> SQLiteVec:
+    """Khởi tạo hoặc lấy cache SQLiteVec store cho dataset"""
+    if name in _vector_stores:
+        return _vector_stores[name]
+    
+    os.makedirs("data/vecdb", exist_ok=True)
+    conn = sqlite3.connect(f"data/vecdb/{name}.db")
+    
+    conn.row_factory = sqlite3.Row
+    
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    
+    vt = SQLiteVec(
+        table="documents",
+        connection=conn,
+        embedding=embeddings
+    )
+    
+    # --- SỬA LỖI Ở ĐÂY ---
+    # Dùng SQL query trực tiếp để đếm số dòng trong bảng "documents"
+    count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    
+    # Nếu database trống (count == 0) thì import dữ liệu
+    if count == 0:
+        print(f"🔄 Đang import {name} vào vector database...")
+        data = read_tao_lao_data(file_path)
+        messages = [item['message'] for item in data if item['message'].strip()]
+        
+        # Normalize text giống như vector-store.py
+        messages = [str(normalize_record(msg)).lower() for msg in messages]
+        messages = [normalize_vnese(msg) for msg in messages]
+        
+        docs = [Document(page_content=msg) for msg in messages]
+        vt.add_documents(docs)
+        print(f"✅ Đã import {len(docs)} document vào {name}")
+    
+    _vector_stores[name] = vt
+    return vt
 
 
 def read_tao_lao_data(file_path: str = "data/tao-lao.jsonl"):
@@ -70,47 +122,27 @@ def cosine_similarity(vec1, vec2):
 _cached_centroid_vector = None
 _cached_centroid_norm = None  # Thêm cache norm
 
-def calculate_tao_lao_similarity(input_text: str, file_path: str = "data/tao-lao.jsonl") -> float:
-    global _cached_centroid_vector, _cached_centroid_norm, _cached_file_mtime
-    
+def calculate_similarity(input_text: str, dataset_name: str) -> float:
+    """Tính độ tương đồng sử dụng SQLiteVec vector database"""
     if not input_text or len(input_text.strip()) == 0:
         return 0.0
-
-    current_mtime = os.path.getmtime(file_path)
     
-    if _cached_centroid_vector is None or _cached_file_mtime != current_mtime:
-        data = read_tao_lao_data(file_path)
-        messages = [item['message'] for item in data if item['message'].strip()]
-        
-        raw_embeddings = embeddings.embed_documents(messages)
-        matrix = np.array(raw_embeddings)
-        
-        # Chuẩn hóa từng vector
-        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-        normalized_matrix = np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms!=0)
-        
-        # Centroid của các vector đã chuẩn hóa
-        _cached_centroid_vector = np.mean(normalized_matrix, axis=0)
-        # QUAN TRỌNG: Chuẩn hóa centroid để thành vector đơn vị
-        _cached_centroid_norm = np.linalg.norm(_cached_centroid_vector)
-        
-        _cached_file_mtime = current_mtime
-        # print(f"[!] Cache sẵn sàng!")
-
-    # Embed và chuẩn hóa input
-    input_embedding = np.array(embeddings.embed_query(input_text))
-    input_norm = np.linalg.norm(input_embedding)
-    if input_norm == 0:
+    # Normalize input text giống hệt khi import data
+    text = str(normalize_record(input_text)).lower()
+    text = normalize_vnese(text)
+    
+    vt = init_vector_store(dataset_name, f"data/{dataset_name}.jsonl")
+    
+    # Lấy kết quả similarity search top 5
+    results = vt.similarity_search_with_score(text, k=10)
+    
+    if not results:
         return 0.0
-    normalized_input = input_embedding / input_norm
     
-    # Chuẩn hóa centroid trước khi dot product
-    normalized_centroid = _cached_centroid_vector / _cached_centroid_norm
+    # Áp dụng công thức quy đổi L2 sang Cosine Similarity):
+    avg_score = sum(1 - (score ** 2) / 2 for _, score in results) / len(results)
     
-    # Cosine similarity = dot(centroid_normalized, input_normalized)
-    similarity = float(np.dot(normalized_centroid, normalized_input)) * 100
-    
-    return round(similarity, 2)
+    return round(avg_score * 100, 2)
 
 if __name__ == "__main__":
     print("🚀 Test function tính độ tương đồng tào lao 🚀")
@@ -228,9 +260,9 @@ if __name__ == "__main__":
     
     for text in test_cases:
         print(f"\n📝 Input: {text}")
-        score_0 = calculate_tao_lao_similarity(text, file_path="data/tao-lao.jsonl")
-        score_1 = calculate_tao_lao_similarity(text, file_path="data/binh-thuong.jsonl")
-        score_2 = calculate_tao_lao_similarity(text, file_path="data/crawl-data.jsonl")
+        score_0 = calculate_similarity(text, "tao-lao")
+        score_1 = calculate_similarity(text, "binh-thuong")
+        score_2 = calculate_similarity(text, "crawl-data")
         print(f"Tào lao: {score_0} %")
         print(f"Bình thường: {score_1} %")
         print(f"Crawl data: {score_2} %")

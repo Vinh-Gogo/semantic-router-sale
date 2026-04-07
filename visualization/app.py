@@ -73,7 +73,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             text = await websocket.receive_text()
             
-            if not text or len(text.strip().split()) < 3:
+            if not text or len(text.strip().split()) < 1:
                 await websocket.send_json({
                     "tao_lao": 0,
                     "crawl_data": 0,
@@ -95,7 +95,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 similarities = np.dot(cache_norms, input_norm)
                 
                 # Lấy top 5 gần nhất
-                top_indices = np.argsort(similarities)[-5:][::-1]
+                top_indices = np.argsort(similarities)[-2:][::-1]
                 top_scores = similarities[top_indices]
                 
                 # Tính điểm trung bình CHỈ từ top 5, không dùng toàn bộ dataset

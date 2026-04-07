@@ -62,11 +62,11 @@ def fix_ids_and_save(file_path: str = "data/tao-lao.jsonl"):
     # Ghi lại file
     with open(file_path, "w", encoding="utf-8") as f:
         for record in data:
-            f.write(json.dumps(record.lower(), ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     
     print(f"✅ Đã cập nhật {len(data)} bản ghi, id tuần tự từ 1 -> {len(data)}")
 
 
-# fix_ids_and_save("data/tao-lao.jsonl")
-# fix_ids_and_save("data/crawl-data.jsonl")
-# fix_ids_and_save("data/binh-thuong.jsonl")
+fix_ids_and_save("data/tao-lao.jsonl")
+fix_ids_and_save("data/crawl-data.jsonl")
+fix_ids_and_save("data/binh-thuong.jsonl")
