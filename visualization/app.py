@@ -22,7 +22,6 @@ from src.test.test import (
 
 app = FastAPI(title="Multi Dataset Similarity Visualizer")
 
-# Cache embeddings cho 3 dataset
 datasets = {
     "tao_lao": {
         "path": "data/tao-lao.jsonl",
@@ -38,35 +37,22 @@ datasets = {
         "path": "data/binh-thuong.jsonl",
         "data": [],
         "embeddings": None
-    },
-    # "hello": {
-    #     "path": "data/hello.jsonl",
-    #     "data": [],
-    #     "embeddings": None
-    # }
+    }
 }
 
 
 @app.on_event("startup")
 async def preload_all_datasets():
     print("🔄 Đang precompute embeddings cho 3 dataset...")
-    
+
     for name, ds in datasets.items():
         print(f"⚡ Đang xử lý {name}...")
         ds['data'] = read_jsonl(ds['path'], deduplicate=True)
         messages = [item['message'] for item in ds['data'] if item['message'].strip()]
         ds['embeddings'] = embeddings.embed_documents(messages)
         print(f"✅ {name}: {len(ds['embeddings'])} vectors")
-    
+
     print("✅ Tất cả dataset đã sẵn sàng!")
-
-
-def calculate_dataset_score(input_embedding, dataset_embeddings):
-    """Tính điểm trung bình similarity cho 1 dataset"""
-    input_norm = input_embedding / np.linalg.norm(input_embedding)
-    cache_norms = dataset_embeddings / np.linalg.norm(dataset_embeddings, axis=1, keepdims=True)
-    similarities = np.dot(cache_norms, input_norm)
-    return float(np.mean(similarities)) * 100
 
 
 @app.websocket("/ws/calculate")
@@ -74,47 +60,99 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            text = await websocket.receive_text()
-            
-            if not text or len(text.strip().split()) < 1:
+            raw = await websocket.receive_text()
+
+            try:
+                payload = json.loads(raw)
+                messages = payload.get("messages", [raw])
+            except json.JSONDecodeError:
+                messages = [raw]
+
+            if not messages or all(not m.strip() for m in messages):
                 await websocket.send_json({
-                    "tao_lao": 0,
-                    "crawl_data": 0,
-                    "binh_thuong": 0,
-                    # "hello": 0,s
+                    "tao_lao": 0, "crawl_data": 0, "binh_thuong": 0,
+                    "top": {"tao_lao": [], "crawl_data": [], "binh_thuong": []},
+                    "detail": {}
                 })
                 continue
-            
-            # Tạo embedding cho input 1 lần duy nhất
-            input_emb = embeddings.embed_query(text)
-            
-            # Tính score đồng thời cho cả 3 dataset
+
+            embs = [embeddings.embed_query(m) for m in messages]
+
             result = {}
             top_matches = {}
-            
+            detail = {"messages": messages, "datasets": {}}
+
             for name, ds in datasets.items():
-                input_norm = input_emb / np.linalg.norm(input_emb)
-                cache_norms = ds['embeddings'] / np.linalg.norm(ds['embeddings'], axis=1, keepdims=True)
-                similarities = np.dot(cache_norms, input_norm)
-                
-                # Lấy top 5 gần nhất
-                top_indices = np.argsort(similarities)[-2:][::-1]
-                top_scores = similarities[top_indices]
-                
-                # Tính điểm trung bình CHỈ từ top 5, không dùng toàn bộ dataset
-                result[name] = round(float(np.mean(top_scores)) * 100, 2)
-                
-                top_matches[name] = [
-                    {
-                        "text": ds['data'][i]['message'],
-                        "score": round(float(similarities[i]) * 100, 2)
-                    }
-                    for i in top_indices
-                ]
-            
+                cache_norms = ds['embeddings'] / np.linalg.norm(
+                    ds['embeddings'], axis=1, keepdims=True
+                )
+
+                all_top = []
+                per_msg_detail = []
+
+                for idx, emb in enumerate(embs):
+                    input_norm = emb / np.linalg.norm(emb)
+                    similarities = np.dot(cache_norms, input_norm)
+
+                    top_indices = np.argsort(similarities)[-2:][::-1]
+                    top_scores = similarities[top_indices]
+
+                    msg_score = round(float(np.mean(top_scores)) * 100, 2)
+
+                    msg_top = [
+                        {
+                            "text": ds['data'][i]['message'],
+                            "score": round(float(similarities[i]) * 100, 2)
+                        }
+                        for i in top_indices
+                    ]
+
+                    per_msg_detail.append({
+                        "index": idx + 1,
+                        "message": messages[idx],
+                        "top": msg_top,
+                        "score": msg_score
+                    })
+
+                    all_top.extend(msg_top)
+
+                # Tính điểm phiên
+                scores_list = [d["score"] for d in per_msg_detail]
+                n = len(scores_list)
+
+                if n >= 2:
+                    avg_old = round(sum(scores_list[:-1]) / (n - 1), 2)
+                    last = scores_list[-1]
+                    final_score = round((avg_old + last) / 2, 2)
+                else:
+                    avg_old = None
+                    last = scores_list[0]
+                    final_score = last
+
+                result[name] = final_score
+
+                detail["datasets"][name] = {
+                    "per_message": per_msg_detail,
+                    "avg_old": avg_old,
+                    "last_score": last,
+                    "final_score": final_score
+                }
+
+                # Loại trùng, lấy top 2
+                seen = set()
+                unique_top = []
+                for item in sorted(all_top, key=lambda x: x['score'], reverse=True):
+                    if item['text'] not in seen:
+                        seen.add(item['text'])
+                        unique_top.append(item)
+                    if len(unique_top) >= 2:
+                        break
+                top_matches[name] = unique_top
+
             result['top'] = top_matches
+            result['detail'] = detail
             await websocket.send_json(result)
-            
+
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
@@ -127,11 +165,8 @@ class ChatSubmit(BaseModel):
 
 @app.post("/submit")
 async def submit_chat_message(data: ChatSubmit):
-    """Endpoint nhận tin nhắn chat và tự động log vào file lưu trữ"""
-    
-    # Tính score cho tin nhắn này
     input_emb = embeddings.embed_query(data.full_conversation)
-    
+
     scores = {}
     for name, ds in datasets.items():
         input_norm = input_emb / np.linalg.norm(input_emb)
@@ -140,8 +175,7 @@ async def submit_chat_message(data: ChatSubmit):
         top_indices = np.argsort(similarities)[-2:][::-1]
         top_scores = similarities[top_indices]
         scores[name] = round(float(np.mean(top_scores)) * 100, 2)
-    
-    # Ghi log vào file vĩnh viễn
+
     log_entry = {
         "timestamp": datetime.utcnow().isoformat(),
         "text": data.text,
@@ -149,11 +183,11 @@ async def submit_chat_message(data: ChatSubmit):
         "scores": scores,
         "predicted_label": max(scores, key=scores.get)
     }
-    
+
     log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-    
+
     return {"status": "ok", "logged": True}
 
 @app.get("/")
