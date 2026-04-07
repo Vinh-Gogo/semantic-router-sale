@@ -1,8 +1,11 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 import numpy as np
 import sys
 import os
+import json
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -117,6 +120,41 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         await websocket.close()
 
+
+class ChatSubmit(BaseModel):
+    text: str
+    full_conversation: str
+
+@app.post("/submit")
+async def submit_chat_message(data: ChatSubmit):
+    """Endpoint nhận tin nhắn chat và tự động log vào file lưu trữ"""
+    
+    # Tính score cho tin nhắn này
+    input_emb = embeddings.embed_query(data.full_conversation)
+    
+    scores = {}
+    for name, ds in datasets.items():
+        input_norm = input_emb / np.linalg.norm(input_emb)
+        cache_norms = ds['embeddings'] / np.linalg.norm(ds['embeddings'], axis=1, keepdims=True)
+        similarities = np.dot(cache_norms, input_norm)
+        top_indices = np.argsort(similarities)[-2:][::-1]
+        top_scores = similarities[top_indices]
+        scores[name] = round(float(np.mean(top_scores)) * 100, 2)
+    
+    # Ghi log vào file vĩnh viễn
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "text": data.text,
+        "full_conversation": data.full_conversation,
+        "scores": scores,
+        "predicted_label": max(scores, key=scores.get)
+    }
+    
+    log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    
+    return {"status": "ok", "logged": True}
 
 @app.get("/")
 async def get_index():
