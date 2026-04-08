@@ -166,61 +166,35 @@ def get_openai_embedding_base_url(base_url: str = 'http://localhost:8080') -> Op
         dimensions=1024
     )
 
-# -------------------------
-# Init vector store
-# -------------------------
+# ====================== CUSTOM SQLiteVec ======================
+class SQLiteVec:
+    def __init__(self, table: str, connection, embedding):
+        self.table = table
+        self.connection = connection
+        self.embedding = embedding
 
-def init_vectorstore_faiss(model, db_folder: str, action: str ='write'):
+    def add_documents(self, documents: list[Document]):
+        """Thêm documents vào SQLite Vec"""
+        for doc in documents:
+            vec = self.embedding.embed_query(doc.page_content)
+            self.connection.execute(
+                f"INSERT INTO {self.table} (text, text_embedding) VALUES (?, ?)",
+                (doc.page_content, vec)
+            )
+        self.connection.commit()
 
-    if action == "write":
-        docs = run_load_data_to_embedding('./src/store/comque_new.csv')
-        docs = run_normalization_data(docs, path_stopwords='./src/store/stopwords-vietnamese.txt')
-        docs = [' | '.join(doc.split(', ')) for doc in docs]
-        
-        dim = len(model.embed_query("hello world"))  # dimension
-        index = faiss.IndexFlatL2(dim)
-
-        vector_store = FAISS(
-            embedding_function=model,
-            index=index,
-            docstore=InMemoryDocstore(),
-            index_to_docstore_id={},
+    def similarity_search_with_score(self, query: str, k: int = 10):
+        """Tìm kiếm tương tự"""
+        import numpy as np
+        query_vec = self.embedding.embed_query(query)
+        # Sử dụng vec_distance_cosine từ sqlite-vec
+        cursor = self.connection.execute(
+            f"""
+            SELECT text, vec_distance_cosine(text_embedding, ?) as distance
+            FROM {self.table} 
+            ORDER BY distance
+            LIMIT ? 
+            """,
+            (np.array(query_vec, dtype=np.float32), k)
         )
-        
-        docs_faiss = [Document(page_content=txt) for txt in docs]
-        uuids = [str(uuid4()) for _ in range(len(docs_faiss))]
-
-        # -------------------------------
-        # 5. Add to FAISS
-        # -------------------------------
-        vector_store.add_documents(documents=docs_faiss, ids=uuids)
-        
-        # SAVE DATABASE
-        vector_store.save_local(db_folder)
-    else:
-        # load FAISS từ ./data
-        vector_store = FAISS.load_local(
-            folder_path=db_folder,
-            embeddings=model,
-            allow_dangerous_deserialization=True  # BẬT lên nếu file do bạn tạo
-        )
-    
-    return vector_store
-
-def init_vectorstore(model, db_folder: str, connection, action:str='write') -> SQLiteVec:
-
-    if action == 'write':
-        os.makedirs(db_folder, exist_ok=True)
-
-        db_file = db_folder+"/vec.db"
-        vt = SQLiteVec(table="state_union", connection=connection, embedding=model)
-        
-        # Nếu DB chưa tồn tại, thêm documents
-        if not os.path.exists(db_file):
-            
-            docs = run_load_data_to_embedding('../store/comque_new.csv')
-            docs = run_normalization_data(docs, path_stopwords='../store/stopwords-vietnamese.txt')
-            list_docs = [Document(page_content=dox, metadata={dox.split(',')[0]}) for dox in docs]
-            vt.add_documents(list_docs)
-        
-    return vt
+        return [(row[0], float(row[1])) for row in cursor.fetchall()]

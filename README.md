@@ -22,14 +22,11 @@ python -m uvicorn visualization.app:app --host 127.0.0.1 --port 8000 --reload
 
 ---
 
-✅ **Đã hiểu rõ vai trò của anh:**  
 Anh là **nhân viên sale cho thuê căn hộ dịch vụ** (serviced apartment), và anh muốn nắm rõ **chủ đề chính** của từng loại file JSONL để sau này dùng cho training AI, filter lead, hoặc xây chatbot xử lý khách hàng.
 
 Dưới đây là phân tích chi tiết **chủ đề liên quan** của từng file, được thiết kế phù hợp với ngữ cảnh **bán căn hộ dịch vụ** (ngắn hạn/dài hạn, khách người Việt & nước ngoài, khu vực HCM):
 
 ### 1. **binh-thuong.jsonl**  
-**Tên đầy đủ:** Bình thường / Lịch sự / Khách hàng chuẩn  
-**Đặc điểm:** Tin nhắn chuyên nghiệp, rõ ràng, mang tính hỏi thông tin thực tế. Đây là 70-80% lead thật mà sale thường gặp.
 
 **Chủ đề chính:**
 - Hỏi thông tin căn hộ (diện tích, số phòng ngủ, nội thất, view)
@@ -44,8 +41,6 @@ Dưới đây là phân tích chi tiết **chủ đề liên quan** của từng
 - Khách hỏi về quy định chung cư (không hút thuốc, không thú cưng, giờ giấc…)
 
 ### 2. **crawl-data.jsonl**  
-**Tên đầy đủ:** Dữ liệu crawl từ web/Facebook/group  
-**Đặc điểm:** Dữ liệu thô thu thập từ các nguồn công khai (group “Cho thuê căn hộ HCM”, “Căn hộ dịch vụ Quận 1,7,2”, Fanpage, website batdongsan, chotot, etc.). Có cả tin đăng cho thuê lẫn comment của khách thật.
 
 **Chủ đề chính:**
 - Bài đăng cho thuê thực tế (mô tả căn hộ, giá, liên hệ)
@@ -59,8 +54,6 @@ Dưới đây là phân tích chi tiết **chủ đề liên quan** của từng
 - Câu hỏi về phí ẩn, hợp đồng điện tử, đặt cọc online
 
 ### 3. **tao-lao.jsonl**  
-**Tên đầy đủ:** Tào lao / Biến thái / Khách “khó” hoặc có ý đồ  
-**Đặc điểm:** Tin nhắn lộn xộn, nhảm, tục tĩu, tán tỉnh, hoặc ngầm đòi “dịch vụ kèm theo”. Đây là nhóm lead mà sale cần lọc hoặc xử lý khéo (khoảng 10-15% nhưng gây tốn thời gian nhất).
 
 **Chủ đề chính (rất sát với 2 file anh đã tạo trước):**
 - Tán tỉnh biến thái với sale (nữ): “Em xinh quá, anh thuê căn hộ để gặp em”, “Em mặc đồ sexy đi xem nhà với anh nha”

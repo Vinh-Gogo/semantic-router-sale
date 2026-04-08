@@ -1,31 +1,21 @@
 import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import json
 import numpy as np
-import sqlite3
-import sqlite_vec
 import requests
 
 from langchain_openai import OpenAIEmbeddings
-from langchain_core.documents import Document
 from pydantic import SecretStr
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# Fix import trực tiếp thay vì import module để tránh lỗi
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from vector_store import normalize_vnese, normalize_record, SQLiteVec
-
-# base_url from env
+# Config
 base_url = os.getenv("OPENAI_BASE_URL_EMBED")
 try:
     resp = requests.get(f"{base_url}/models", timeout=5)
     model_id = resp.json()["data"][0]["id"]
     print(f"🔍 Auto-detected model: {model_id}")
-except Exception as e:
+except Exception:
     model_id = os.getenv("OPENAI_API_MODEL_NAME_EMBED")
     print(f"⚠️ Using fallback model: {model_id}")
 
@@ -34,56 +24,13 @@ embeddings = OpenAIEmbeddings(
     base_url=os.getenv("OPENAI_BASE_URL_EMBED"),
     api_key=SecretStr(os.getenv("OPENAI_API_KEY_EMBED", "text")),
     check_embedding_ctx_length=False,
-    # tiktoken_enabled=False,
 )
 
-# Cache vector store SQLiteVec
-_vector_stores = {}
+# Cache cho 3 lớp: {file_path: (centroid_vector, norm, mtime)}
+_centroid_cache = {}
 
-def init_vector_store(name: str, file_path: str) -> SQLiteVec:
-    """Khởi tạo hoặc lấy cache SQLiteVec store cho dataset"""
-    if name in _vector_stores:
-        return _vector_stores[name]
-    
-    os.makedirs("data/vecdb", exist_ok=True)
-    conn = sqlite3.connect(f"data/vecdb/{name}.db")
-    
-    conn.row_factory = sqlite3.Row
-    
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
-    
-    vt = SQLiteVec(
-        table="documents",
-        connection=conn,
-        embedding=embeddings
-    )
-    
-    # --- SỬA LỖI Ở ĐÂY ---
-    # Dùng SQL query trực tiếp để đếm số dòng trong bảng "documents"
-    count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-    
-    # Nếu database trống (count == 0) thì import dữ liệu
-    if count == 0:
-        print(f"🔄 Đang import {name} vào vector database...")
-        data = read_tao_lao_data(file_path)
-        messages = [item['message'] for item in data if item['message'].strip()]
-        
-        # Normalize text giống như vector-store.py
-        messages = [str(normalize_record(msg)).lower() for msg in messages]
-        messages = [normalize_vnese(msg) for msg in messages]
-        
-        docs = [Document(page_content=msg) for msg in messages]
-        vt.add_documents(docs)
-        print(f"✅ Đã import {len(docs)} document vào {name}")
-    
-    _vector_stores[name] = vt
-    return vt
-
-
-def read_tao_lao_data(file_path: str = "data/tao-lao.jsonl"):
-    """Đọc file dữ liệu tao lao định dạng jsonl"""
+def read_jsonl(file_path: str):
+    """Đọc file jsonl"""
     data = []
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -96,173 +43,242 @@ def read_tao_lao_data(file_path: str = "data/tao-lao.jsonl"):
                     continue
     return data
 
-
-def fix_ids_and_save(file_path: str = "data/tao-lao.jsonl"):
-    """Sửa lại id theo thứ tự tăng dần liên tục và ghi lại vào file"""
-    data = read_tao_lao_data(file_path)
+def get_centroid(file_path: str):
+    """Lấy centroid cho một file, có cache"""
+    global _centroid_cache
     
-    # Gán lại id theo thứ tự
-    for index, record in enumerate(data, start=1):
-        record['id'] = index
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Không tìm thấy {file_path}")
     
-    # Ghi lại file
-    with open(file_path, "w", encoding="utf-8") as f:
-        for record in data:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    current_mtime = os.path.getmtime(file_path)
     
-    return len(data)
+    if file_path in _centroid_cache:
+        vec, norm, mtime = _centroid_cache[file_path]
+        if mtime == current_mtime:
+            return vec, norm
+    
+    # Tính centroid mới
+    data = read_jsonl(file_path)
+    messages = [item['conversation'] for item in data if item.get('conversation', '').strip()]
+    if not messages:
+        raise ValueError(f"{file_path} không có dữ liệu")
+    
+    print(f"📊 Computing centroid for {file_path} ({len(messages)} samples)...")
+    
+    # Batch embedding (TEI giới hạn 32)
+    BATCH_SIZE = 32
+    raw_embeddings = []
+    
+    for i in range(0, len(messages), BATCH_SIZE):
+        batch = messages[i:i+BATCH_SIZE]
+        batch_embeddings = embeddings.embed_documents(batch)
+        raw_embeddings.extend(batch_embeddings)
+    
+    matrix = np.array(raw_embeddings)
+    
+    # Chuẩn hóa từng vector thành unit vector
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1, norms)
+    normalized_matrix = matrix / norms
+    
+    # Centroid = trung bình các unit vectors
+    centroid = np.mean(normalized_matrix, axis=0)
+    centroid_norm = np.linalg.norm(centroid)
+    
+    if centroid_norm > 0:
+        centroid = centroid / centroid_norm
+    
+    _centroid_cache[file_path] = (centroid, centroid_norm, current_mtime)
+    return centroid, centroid_norm
 
-
-def cosine_similarity(vec1, vec2):
-    vec1_norm = vec1 / np.linalg.norm(vec1)
-    vec2_norm = vec2 / np.linalg.norm(vec2)
-    return float(np.dot(vec1_norm, vec2_norm))
-
-
-_cached_centroid_vector = None
-_cached_centroid_norm = None  # Thêm cache norm
-
-def calculate_similarity(input_text: str, dataset_name: str) -> float:
-    """Tính độ tương đồng sử dụng SQLiteVec vector database"""
-    if not input_text or len(input_text.strip()) == 0:
+def cosine_similarity_with_centroid(input_text: str, centroid: np.ndarray):
+    """Tính cosine similarity giữa input và centroid"""
+    if not input_text or not input_text.strip():
         return 0.0
     
-    # Normalize input text giống hệt khi import data
-    text = str(normalize_record(input_text)).lower()
-    text = normalize_vnese(text)
+    input_embedding = np.array(embeddings.embed_query(input_text))
+    input_norm = np.linalg.norm(input_embedding)
     
-    vt = init_vector_store(dataset_name, f"data/{dataset_name}.jsonl")
-    
-    # Lấy kết quả similarity search top 5
-    results = vt.similarity_search_with_score(text, k=10)
-    
-    if not results:
+    if input_norm == 0:
         return 0.0
     
-    # Áp dụng công thức quy đổi L2 sang Cosine Similarity):
-    avg_score = sum(1 - (score ** 2) / 2 for _, score in results) / len(results)
+    normalized_input = input_embedding / input_norm
+    similarity = float(np.dot(centroid, normalized_input))
     
-    return round(avg_score * 100, 2)
+    return similarity * 100  # Trả về %
+
+def predict_3_class(input_text: str):
+    """Dự đoán lớp có similarity cao nhất"""
+    classes = {
+        "TAO_LAO": "data/tao-lao.jsonl",
+        "BINH_THUONG": "data/binh-thuong.jsonl",
+        "CRAWL_DATA": "data/crawl-data.jsonl"
+    }
+    
+    scores = {}
+    for label, file_path in classes.items():
+        centroid, _ = get_centroid(file_path)
+        scores[label] = cosine_similarity_with_centroid(input_text, centroid)
+    
+    # Argmax - chọn lớp có điểm cao nhất
+    predicted_label = max(scores, key=scores.get)
+    
+    return predicted_label, scores
 
 if __name__ == "__main__":
-    print("🚀 Test function tính độ tương đồng tào lao 🚀")
+    print("🚀 Đánh giá Accuracy 3 lớp: TAO_LAO | BINH_THUONG | CRAWL_DATA")
     print("=" * 70)
     
+    # Test cases: (text, true_label)
     test_cases = [
-    # --- NHÓM 1: CÂU HỎI "TÀO LAO" / KHÔNG LIÊN QUAN / TRÊU CHỌC (Test độ nhạy của tập tao-lao.jsonl) ---
-    "Anh chủ ơi cho em vay 50k mua cơm hộp nha tối trả",
-    "Em sale dễ thương quá, tối nay có rảnh đi cà phê với anh không?",
-    "Phòng đẹp đấy, nhưng mà anh hết tiền rồi, cho anh ở nợ vài tháng nhé?",
-    "Trời mưa to quá, dột hết ướt cả giường rồi em ơi, đền anh đi!",
-    "Bên em có bán kem trộn không, dạo này da anh đen quá.",
-    "Nay xổ số miền Bắc đánh con gì dễ trúng hả em?",
-    "Anh buồn quá, em hát cho anh nghe một bài rồi anh chốt cọc luôn.",
-    "Căn này nhìn phong thủy u ám quá, có ma không em?",
-    "Anh thuê phòng xong em qua nấu cơm rửa bát cho anh luôn nhé?",
-    "Tháng này anh kẹt quá, cho anh gán nợ bằng con chó cưng được không?",
-    "Dạo này Bitcoin lên xuống thất thường, em nghĩ anh có nên bắt đáy không?",
-    "Phòng ốc gì mà nóng như cái lò, bật điều hòa 16 độ nãy giờ không mát!",
-    "Em ăn cơm chưa?",
-    "Cho anh mượn tài khoản Netflix xem đỡ buồn tối nay đi em.",
-    "Bên em có nhận cầm đồ không? Anh cắm cái xe máy lấy tiền thuê nhà.",
-    "Ủa anh nhắn nhầm số, xin lỗi em nhé.",
-    "Mai anh dọn đi luôn, không ở nữa, trả cọc lại cho anh ngay!",
-    "Hôm qua anh say quá nôn ra sàn, bên em có người qua dọn không?",
-    "Em ơi mua giùm anh bao thuốc lá rồi mang lên phòng 302 nhé.",
-    "Tối nay đá banh Việt Nam - Thái Lan mấy giờ em nhỉ?",
-    "Sao WiFi pass là 12345678 mà anh nhập mãi không được, lừa đảo à?",
-    "Nhà tắm bị tắc bồn cầu rồi, trào hết cả ra ngoài cứu anh với!",
-    "Anh vừa cãi nhau với người yêu, em tư vấn tâm lý cho anh tí được không?",
-    "Chủ nhà khó tính quá, anh ghét không thèm thuê nữa.",
-    "Cho anh xin info bạn nữ ở phòng đối diện đi em.",
-    "Có ai nhặt được cái ví của anh rơi ở hầm để xe không?",
-    "Alo, tổng đài Viettel đúng không ạ?",
-    "Em ơi khu này có quán nhậu nào ngon bổ rẻ chỉ anh với.",
-    "Mai anh trốn nợ, có người đến tìm thì bảo anh không ở đây nhé.",
-    "Phòng này bao ăn bao ở bao luôn cả người yêu không em?",
-
-    # --- NHÓM 2: CÂU HỎI TIÊU CHUẨN / THÔNG TIN CƠ BẢN (Test tập binh-thuong.jsonl) ---
-    "Căn hộ này giá thuê một tháng là bao nhiêu vậy em?",
-    "Em cho anh xin thêm hình ảnh thật của căn 1 phòng ngủ nhé.",
-    "Địa chỉ chính xác của tòa nhà này ở đâu em?",
-    "Giá thuê này đã bao gồm phí quản lý và dọn phòng chưa?",
-    "Tiền điện nước ở đây tính theo giá nhà nước hay giá dịch vụ?",
-    "Bên mình có căn nào full nội thất xách vali vào ở luôn không?",
-    "Có chỗ đậu xe ô tô không em, phí gửi xe tháng bao nhiêu?",
-    "Khu vực này có hay bị ngập nước vào mùa mưa không em?",
-    "Tòa nhà mình có thang máy và bảo vệ 24/7 không?",
-    "Anh muốn đi xem phòng thực tế vào chiều nay có được không?",
-    "Căn studio diện tích bao nhiêu mét vuông vậy em?",
-    "Có được nấu ăn trong phòng không em? Bếp điện hay gas?",
-    "Xung quanh đây có siêu thị hay cửa hàng tiện lợi nào gần không?",
-    "Em gửi anh bảng báo giá chi tiết các loại phòng bên em đang có nhé.",
-    "Căn này có ban công hay cửa sổ lớn đón nắng không?",
-    "Phí dịch vụ hàng tháng bên mình gồm những gì vậy em?",
-    "Máy giặt dùng chung hay mỗi phòng có một cái riêng?",
-    "Bên em có hỗ trợ đăng ký tạm trú tạm vắng cho người nước ngoài không?",
-    "Giờ giấc ở đây có tự do không hay có giờ giới nghiêm?",
-    "Wifi mỗi tầng một cục phát hay dùng chung cả nhà?",
-    "Hành lang và khu vực chung có được vệ sinh thường xuyên không?",
-    "Căn 2 phòng ngủ có 2 nhà vệ sinh riêng biệt không em?",
-    "Anh thấy trên mạng đăng giá 8 triệu, sao em báo 9 triệu?",
-    "Có phòng nào trống có thể dọn vào đầu tháng sau không?",
-    "Nếu anh ký hợp đồng dài hạn 1 năm thì có được giảm giá không?",
-    "Sân thượng có khu vực phơi đồ hay BBQ không em?",
-    "Hệ thống phòng cháy chữa cháy của tòa nhà có đảm bảo không?",
-    "Từ đây ra bến xe trung tâm hoặc trạm MRT đi mất bao lâu?",
-    "Anh muốn tìm một căn yên tĩnh, không ồn ào tiếng xe cộ.",
-    "Trong phòng đã trang bị sẵn tivi và tủ lạnh chưa?",
-
-    # --- NHÓM 3: CÂU HỎI VỀ HỢP ĐỒNG / PHÁP LÝ / ĐIỀU KHOẢN (Test tập crawl-data hoặc binh-thuong chi tiết) ---
-    "Hợp đồng thuê bên mình yêu cầu cọc mấy tháng tiền nhà?",
-    "Nếu anh chuyển đi trước thời hạn hợp đồng thì có bị mất cọc không?",
-    "Điều khoản tăng giá nhà hàng năm được quy định như thế nào trong hợp đồng?",
-    "Bên em có xuất hóa đơn đỏ (VAT) cho công ty thuê được không?",
-    "Khi bàn giao phòng, hai bên sẽ có biên bản kiểm kê nội thất rõ ràng chứ?",
-    "Anh có được phép tự ý thay đổi màu sơn hoặc khoan tường treo tranh không?",
-    "Trường hợp thiết bị điện lạnh bị hỏng hóc thì bên nào chịu chi phí sửa chữa?",
-    "Tiền cọc sẽ được hoàn trả trong vòng bao nhiêu ngày sau khi thanh lý hợp đồng?",
-    "Có phụ phí gì phát sinh thêm ngoài hợp đồng mà anh cần lưu ý không?",
-    "Tòa nhà có quy định nghiêm ngặt về việc dẫn bạn bè về chơi qua đêm không?",
-    "Khách đến chơi có phải để lại CMND/CCCD ở chốt bảo vệ không?",
-    "Anh nuôi 2 con mèo thì tòa nhà có cho phép không? Có tính thêm phí thú cưng không?",
-    "Trường hợp bất khả kháng do dịch bệnh phải trả phòng thì giải quyết sao em?",
-    "Hợp đồng thuê tối thiểu là 3 tháng hay 6 tháng?",
-    "Anh có thể thanh toán tiền thuê nhà bằng thẻ tín dụng được không?",
-    "Nếu đóng tiền nhà trễ hạn thì có bị phạt lãi suất không?",
-    "Tòa nhà có nội quy chi tiết về việc vứt rác và phân loại rác không?",
-    "Anh muốn làm hợp đồng đứng tên 2 người thì có cần thêm giấy tờ gì không?",
-    "Bên em có cam kết không tăng giá điện nước trong suốt thời hạn hợp đồng không?",
-    "Khi hết hợp đồng mà anh muốn gia hạn thì cần báo trước bao nhiêu ngày?",
-
-    # --- NHÓM 4: PHẢN HỒI / ĐÁNH GIÁ / TÌNH HUỐNG HỖ TRỢ (Test dữ liệu thực tế) ---
-    "Hôm qua anh đến xem mà thấy hành lang hơi tối, bên em có định lắp thêm đèn không?",
-    "Anh rất ưng phòng, nhưng giá hơi cao so với ngân sách, em xem xin sếp bớt chút đỉnh được không?",
-    "Phòng thực tế hơi nhỏ so với ảnh em chụp góc rộng nhỉ.",
-    "Anh gửi định vị rồi em ra đón anh ở đầu hẻm được không, đường rắc rối quá.",
-    "Cửa sổ phòng 401 chốt bị lỏng, em báo kỹ thuật lên xem giúp anh.",
-    "Hôm nay có lịch dọn phòng mà sao chiều rồi anh về vẫn chưa thấy ai dọn vậy em?",
-    "Máy lạnh kêu to quá anh không ngủ được, bảo trì lên kiểm tra giùm nhé.",
-    "Hóa đơn điện tháng này của anh tăng đột biến, em check lại công tơ giúp anh.",
-    "Tòa nhà dạo này có mùi hôi từ cống bốc lên, em báo ban quản lý xử lý gấp.",
-    "Có nhà kế bên sửa chữa ồn quá, tòa nhà mình có quy định giờ thi công không?",
-    "Cảm ơn em đã hỗ trợ nhiệt tình, đầu giờ chiều mai anh qua ký hợp đồng.",
-    "Em ơi anh lỡ làm vỡ cái gương trong nhà tắm rồi, đền bao nhiêu để anh chuyển khoản?",
-    "Sáng nay máy giặt chung báo lỗi rò rỉ nước, mọi người không dùng được em ạ.",
-    "Bên mình có dịch vụ giặt ủi lấy liền không, anh đang cần gấp.",
-    "Anh muốn thuê thêm một chỗ đậu xe máy nữa thì có chỗ không?",
-    "Cuối tuần này anh tổ chức sinh nhật nhỏ trên sân thượng có cần đăng ký trước không?",
-    "Anh sắp đi công tác 1 tháng, có thể bảo lưu tiền phòng hoặc giảm giá dịch vụ không?",
-    "Thang máy số 2 bấm không nhận tầng, kỹ thuật bên em biết chưa?",
-    "Anh chuyển khoản tiền nhà tháng này rồi nhé, em kiểm tra và gửi biên lai cho anh.",
-    "Phòng ốc ok, dịch vụ tốt, anh sẽ giới thiệu bạn bè qua bên em thuê."
-]
+        # === TÀO LAO (12 samples) ===
+        ("Anh chủ ơi cho em vay 50k mua cơm hộp nha tối trả", "TAO_LAO"),
+        ("Em sale dễ thương quá, tối nay có rảnh đi cà phê với anh không?", "TAO_LAO"),
+        ("Phòng đẹp đấy, nhưng mà anh hết tiền rồi, cho anh ở nợ vài tháng nhé?", "TAO_LAO"),
+        ("Bên em có bán kem trộn không, dạo này da anh đen quá.", "TAO_LAO"),
+        ("Nay xổ số miền Bắc đánh con gì dễ trúng hả em?", "TAO_LAO"),
+        ("Anh buồn quá, em hát cho anh nghe một bài rồi anh chốt cọc luôn.", "TAO_LAO"),
+        ("Căn này nhìn phong thủy u ám quá, có ma không em?", "TAO_LAO"), # Có thể châm chước
+        ("Anh thuê phòng xong em qua nấu cơm rửa bát cho anh luôn nhé?", "TAO_LAO"),
+        ("Tháng này anh kẹt quá, cho anh gán nợ bằng con chó cưng được không?", "TAO_LAO"),
+        ("Em ăn cơm chưa?", "TAO_LAO"),
+        ("Cho anh mượn tài khoản Netflix xem đỡ buồn tối nay đi em.", "TAO_LAO"),
+        ("Phòng này bao ăn bao ở bao luôn cả người yêu không em?", "TAO_LAO"),
+        ("Em ơi khu này có quán nhậu nào ngon bổ rẻ chỉ anh với.", "TAO_LAO"),
+        
+        # === BÌNH THƯỜNG (18 samples - Thêm các ca xử lý mâu thuẫn/vận hành) ===
+        ("Căn hộ này giá thuê một tháng là bao nhiêu vậy em?", "BINH_THUONG"),
+        ("Em cho anh xin thêm hình ảnh thật của căn 1 phòng ngủ nhé.", "BINH_THUONG"),
+        ("Địa chỉ chính xác của tòa nhà này ở đâu em?", "BINH_THUONG"),
+        ("Giá thuê này đã bao gồm phí quản lý và dọn phòng chưa?", "BINH_THUONG"),
+        ("Tiền điện nước ở đây tính theo giá nhà nước hay giá dịch vụ?", "BINH_THUONG"),
+        ("Bên mình có căn nào full nội thất xách vali vào ở luôn không?", "BINH_THUONG"),
+        ("Có chỗ đậu xe ô tô không em, phí gửi xe tháng bao nhiêu?", "BINH_THUONG"),
+        ("Khu vực này có hay bị ngập nước vào mùa mưa không em?", "BINH_THUONG"),
+        ("Tòa nhà mình có thang máy và bảo vệ 24/7 không?", "BINH_THUONG"),
+        ("Anh muốn đi xem phòng thực tế vào chiều nay có được không?", "BINH_THUONG"),
+        ("Căn studio diện tích bao nhiêu mét vuông vậy em?", "BINH_THUONG"),
+        ("Có được nấu ăn trong phòng không em? Bếp điện hay gas?", "BINH_THUONG"),
+        ("Xung quanh đây có siêu thị hay cửa hàng tiện lợi nào gần không?", "BINH_THUONG"),
+        ("Căn 2 phòng ngủ có 2 nhà vệ sinh riêng biệt không em?", "BINH_THUONG"),
+        ("Nếu anh ký hợp đồng dài hạn 1 năm thì có được giảm giá không?", "BINH_THUONG"),
+        ("Trời mưa to quá, dột hết ướt cả giường rồi em ơi, đền anh đi!", "BINH_THUONG"), # Đã fix
+        ("Mai anh dọn đi luôn, không ở nữa, trả cọc lại cho anh ngay!", "BINH_THUONG"), # Đã fix
+        ("Cho em xem ảnh thực tế để em check chất lượng", "BINH_THUONG"), # Đã fix từ Crawl_Data sang
+        
+        # === CRAWL DATA (14 samples) ===
+        ("Cho em xin giá phòng để em nhập vào hệ thống CRM", "CRAWL_DATA"),
+        ("Anh cho em hỏi thông tin để em training AI chatbot", "CRAWL_DATA"),
+        ("Chị gửi em hình ảnh để em viết báo cáo thị trường", "CRAWL_DATA"),
+        ("Em đang crawl dữ liệu cho đồ án tốt nghiệp", "CRAWL_DATA"),
+        ("Anh cho em xin thông tin để em phân tích đối thủ", "CRAWL_DATA"),
+        ("Em cần data để train model machine learning", "CRAWL_DATA"),
+        ("Cho em xem giá tham khảo để em viết bài review", "CRAWL_DATA"),
+        ("Em đang làm research về thị trường nhà trọ quận này", "CRAWL_DATA"),
+        ("Anh cho em xin thông tin để em nhập database", "CRAWL_DATA"),
+        ("Em cần mẫu tin nhắn để xây dựng chatbot tự động", "CRAWL_DATA"),
+        ("Em đang thu thập dữ liệu cho luận văn master", "CRAWL_DATA"),
+        ("Anh gửi em bảng giá để em so sánh với đối thủ", "CRAWL_DATA"),
+        ("Em cần thông tin để populate vào app của em", "CRAWL_DATA"),
+        ("Cho em hỏi giá để em scraping data xây dựng API", "CRAWL_DATA"),
+    ]
+    # Test cases: (text, true_label)
+    # test_cases = [
+    #     # === TÀO LAO (12 samples) ===
+    #     # Các câu khách nhắn hoặc spam không liên quan gì đến nghiệp vụ thuê nhà
+    #     ("Hôm nay trời mưa to quá, đi đường ngập hết cả xe.", "TAO_LAO"),
+    #     ("Bạn ăn cơm chưa hay đang bận chạy KPI?", "TAO_LAO"),
+    #     ("Tự nhiên buồn ngủ quá, chả muốn làm gì.", "TAO_LAO"),
+    #     ("123456 test bot alo alo", "TAO_LAO"),
+    #     ("Cuối tuần này có phim gì ngoài rạp hay không nhỉ?", "TAO_LAO"),
+    #     ("Anh đẹp trai thế này có người yêu chưa?", "TAO_LAO"),
+    #     ("Bấm nhầm, không có gì đâu nhé.", "TAO_LAO"),
+    #     ("Xin lỗi tôi gửi nhầm tin nhắn cho người khác.", "TAO_LAO"),
+    #     ("Haha ok ok buồn cười thật đấy =)))", "TAO_LAO"),
+    #     ("Cho mình vay 5 triệu qua tuần trả được không?", "TAO_LAO"),
+    #     ("Hôm qua xem đá bóng MU thua chán ghê.", "TAO_LAO"),
+    #     ("gửi ảnh con mèo qua xem nào", "TAO_LAO"),
+        
+    #     # === BÌNH THƯỜNG (18 samples - Nghiệp vụ Sale BĐS cho thuê/Nhắn tin khách hàng) ===
+    #     # Tập trung vào hỏi đáp giá, tiện ích, cọc, hợp đồng, lịch xem nhà
+    #     ("Anh muốn xem hợp đồng mẫu trước khi quyết định thuê", "BINH_THUONG"),
+    #     ("Căn 2 ngủ ở Masteri dạo này giá thuê tầm bao nhiêu em?", "BINH_THUONG"),
+    #     ("Giá 15 triệu này là đã bao gồm phí quản lý tòa nhà chưa bạn?", "BINH_THUONG"),
+    #     ("Tối nay khoảng 7h chị ghé xem thực tế căn góc tầng 12A được không?", "BINH_THUONG"),
+    #     ("Em gửi anh video quay cận cảnh phòng khách và toilet căn The Sun Avenue nha.", "BINH_THUONG"),
+    #     ("Chủ nhà có bớt chút lộc không em, anh cọc luôn và dọn vào ở đầu tháng sau.", "BINH_THUONG"),
+    #     ("Căn này hướng ban công là gì thế? Buổi chiều có bị hắt nắng gắt không?", "BINH_THUONG"),
+    #     ("Khu này có gym với hồ bơi free cho cư dân không em, hay phải đóng phí riêng?", "BINH_THUONG"),
+    #     ("Bên mình ký hợp đồng tối thiểu 1 năm hay 6 tháng cũng được hả em?", "BINH_THUONG"),
+    #     ("Nếu anh thuê dài hạn thì chủ nhà có hỗ trợ sắm thêm cho cái máy giặt không?", "BINH_THUONG"),
+    #     ("Mai mấy giờ anh rảnh, em dẫn anh lên check lại nội thất bàn giao trước khi chốt nhé.", "BINH_THUONG"),
+    #     ("Anh vừa chuyển khoản tiền cọc 10 triệu rồi, em check tin nhắn báo chủ nhà giữ căn giúp anh.", "BINH_THUONG"),
+    #     ("Phí gửi xe máy và ô tô dưới hầm chung cư này mỗi tháng là bao nhiêu vậy?", "BINH_THUONG"),
+    #     ("Cho chị hỏi nếu đơn phương chấm dứt hợp đồng trước hạn 2 tháng thì có mất cọc không?", "BINH_THUONG"),
+    #     ("Dạ căn 3 phòng ngủ ở Landmark 81 đang trống, đầy đủ nội thất xách vali vào ở liền được luôn ạ.", "BINH_THUONG"),
+    #     ("Khách cũ vừa dọn đi nên thứ 3 tuần sau mới có người dọn vệ sinh công nghiệp xong nha anh.", "BINH_THUONG"),
+    #     ("Chung cư này ban quản lý có cho nuôi thú cưng không bạn, mình có một bé poodle nhỏ.", "BINH_THUONG"),
+    #     ("Căn hộ 1PN+1 bên này hỗ trợ cho người nước ngoài đăng ký tạm trú không em?", "BINH_THUONG"),
+        
+    #     # === CRAWL_DATA (14 samples - Lệnh cào dữ liệu, dễ bị nhầm với "lấy/xem thông tin") ===
+    #     ("Viết script Python để crawl toàn bộ giá thuê căn hộ trên Batdongsan.com.vn khu vực Quận 2.", "CRAWL_DATA"),
+    #     ("Lấy tất cả bình luận và ID người dùng của bài viết môi giới này trên fanpage Facebook.", "CRAWL_DATA"),
+    #     ("Thu thập thông tin liên hệ của chính chủ cho thuê nhà trên trang Chợ Tốt.", "CRAWL_DATA"),
+    #     ("Cào dữ liệu lịch sử biến động giá cho thuê chung cư Vinhomes Central Park trong vòng 3 năm qua.", "CRAWL_DATA"),
+    #     ("Scrape danh sách dự án, giá phòng và đánh giá của cư dân trên diễn đàn Otosaigon.", "CRAWL_DATA"),
+    #     ("Trích xuất tự động tiêu đề, tóm tắt và đường link của các bài đăng cho thuê nhà mới nhất.", "CRAWL_DATA"),
+    #     ("Xây dựng tool crawl data danh sách căn hộ kèm diện tích và số phòng ngủ trên Rever.", "CRAWL_DATA"),
+    #     ("Lấy dữ liệu text và hình ảnh từ các bài post trên group Hội Cư Dân chung cư X.", "CRAWL_DATA"),
+    #     ("Viết tool tự động duyệt qua các trang và tải về tất cả ảnh mặt bằng độ phân giải cao từ website dự án.", "CRAWL_DATA"),
+    #     ("Thu thập thông tin giá thuê, năm bàn giao, và phí quản lý của các chung cư cũ trên trang Propzy.", "CRAWL_DATA"),
+    #     ("Crawl toàn bộ review 1 sao của khách hàng về ban quản lý tòa nhà này trên Google Maps.", "CRAWL_DATA"),
+    #     ("Cào nội dung số điện thoại từ các bình luận trên Tiktok của kênh review bất động sản.", "CRAWL_DATA"),
+    #     ("Thiết lập bot chạy cronjob hằng ngày để lấy data căn hộ đăng mới trên website.", "CRAWL_DATA"),
+    #     ("Scraping dữ liệu danh sách khách hàng từ phần mềm CRM xuất ra file excel tự động.", "CRAWL_DATA")
+    # ]
     
-    for text in test_cases:
-        print(f"\n📝 Input: {text}")
-        score_0 = calculate_similarity(text, "tao-lao")
-        score_1 = calculate_similarity(text, "binh-thuong")
-        score_2 = calculate_similarity(text, "crawl-data")
-        print(f"Tào lao: {score_0} %")
-        print(f"Bình thường: {score_1} %")
-        print(f"Crawl data: {score_2} %")
+    # Đánh giá
+    correct = 0
+    total = len(test_cases)
+    
+    # Confusion matrix: {true: {pred: count}}
+    labels = ["TAO_LAO", "BINH_THUONG", "CRAWL_DATA"]
+    confusion = {true: {pred: 0 for pred in labels} for true in labels}
+    
+    print(f"\n🔍 Bắt đầu test {total} samples...\n")
+    
+    for i, (text, true_label) in enumerate(test_cases, 1):
+        pred_label, scores = predict_3_class("Customer: " + text)
+        
+        is_correct = pred_label == true_label
+        if is_correct:
+            correct += 1
+        confusion[true_label][pred_label] += 1
+        
+        status = "✅" if is_correct else "❌"
+        print(f"  Text: {text}")
+        print(f"{status} #{i:02d} [{pred_label:12s}] Tào:{scores['TAO_LAO']:5.1f}% "
+              f"Bình:{scores['BINH_THUONG']:5.1f}% Crawl:{scores['CRAWL_DATA']:5.1f}%")
+    
+    # Kết quả
+    accuracy = correct / total * 100
+    
+    print(f"\n{'='*70}")
+    print(f"📊 KẾT QUẢ TỔNG HỢP")
+    print(f"{'='*70}")
+    print(f"✅ Accuracy: {accuracy:.2f}% ({correct}/{total})")
+    
+    print(f"\n📋 Confusion Matrix:")
+    print(f"{'':15} | {'Pred Tào':>10} | {'Pred Bình':>10} | {'Pred Crawl':>10}")
+    print("-" * 60)
+    for true in labels:
+        row = confusion[true]
+        print(f"{true:15} | {row['TAO_LAO']:10} | {row['BINH_THUONG']:10} | {row['CRAWL_DATA']:10}")
+    
+    # Per-class accuracy
+    print(f"\n📈 Per-class Accuracy:")
+    for label in labels:
+        tp = confusion[label][label]
+        total_class = sum(confusion[label].values())
+        acc = tp / total_class * 100 if total_class > 0 else 0
+        print(f"  {label:12}: {acc:5.2f}% ({tp}/{total_class})")
