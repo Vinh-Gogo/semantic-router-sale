@@ -156,12 +156,14 @@
                 <span id="conn">Connecting</span>
             </div>
             <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Chuyển giao diện">☀</button>
+            <button class="t-btn" onclick="newChat()">+ Chat mới</button>
         </div>
     </header>
 
     <div class="tab-nav">
         <button class="t-btn active" onclick="switchTab('view-chat', this)">💬 Chat Tester</button>
-        <button class="t-btn" onclick="switchTab('view-manage', this); loadManageHistory()">📂 Quản lý Dữ liệu</button>
+        <button class="t-btn" onclick="switchTab('view-manage', this); loadManageHistory()">📂 CHƯA KIỂM TRA</button>
+        <button class="t-btn" onclick="switchTab('view-reviewed', this); loadReviewedHistory()">✅ Đã Kiểm Tra</button>
     </div>
 
     <div id="view-chat" class="view-content active">
@@ -211,211 +213,285 @@
         </section>
     </div>
 
+    <div id="view-reviewed" class="view-content">
+        <section class="history-section">
+            <div class="glass">
+                <div class="card-head">
+                    <h3>Dữ liệu đã kiểm tra (Top 50)</h3>
+                    <button class="t-btn" onclick="loadReviewedHistory()" style="padding: 4px 10px; font-size: 9px;">🔄 Làm mới</button>
+                </div>
+                <div class="m-list" id="rList">
+                    <div class="h-empty"><p>Đang tải dữ liệu...</p></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
 </div>
 
 <script>
-let ws, H = [], N = 0, isLight = false;
-const LM = { 'tao_lao': { c: 'r' }, 'binh_thuong': { c: 'g' }, 'crawl_data': { c: 'b' } };
+    function newChat() {
+    H = [];
+    currentChatId = null;
+    document.getElementById('msgs').innerHTML = '<div class="empty"><div class="ico">◈</div><p>Nhập tin nhắn để phân loại</p></div>';
+    document.getElementById('msgN').textContent = '0';
+    }
+    let ws, H = [], N = 0, isLight = false, currentChatId = null;
+    const LM = { 'tao_lao': { c: 'r' }, 'binh_thuong': { c: 'g' }, 'crawl_data': { c: 'b' } };
 
-function toggleTheme() {
-    isLight = !isLight;
-    document.body.classList.toggle('light', isLight);
-    document.getElementById('themeBtn').textContent = isLight ? '☾' : '☀';
-}
-
-function switchTab(viewId, btn) {
-    document.querySelectorAll('.view-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.t-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById(viewId).classList.add('active');
-    btn.classList.add('active');
-}
-
-function init() {
-    ws = new WebSocket(`ws://${location.host}/ws/calculate`);
-    ws.onopen = () => {
-        document.getElementById('dot').classList.add('on');
-        document.getElementById('conn').textContent = 'Live';
-    };
-    ws.onclose = () => {
-        document.getElementById('dot').classList.remove('on');
-        document.getElementById('conn').textContent = 'Reconnect';
-        setTimeout(init, 2000);
-    };
-}
-
-async function send() {
-    const inp = document.getElementById('inp');
-    const t = inp.value.trim();
-    if (!t) return;
-
-    H.push(t);
-    const full = H.join('\n');
-    document.getElementById('msgN').textContent = H.length;
-
-    const box = document.getElementById('msgs');
-    const emp = box.querySelector('.empty');
-    if (emp) emp.remove();
-
-    const m = document.createElement('div');
-    m.className = 'bubble me';
-    m.textContent = t;
-    box.appendChild(m);
-    box.scrollTop = box.scrollHeight;
-
-    inp.value = '';
-    inp.style.height = 'auto';
-
-    const btn = document.getElementById('btn');
-    btn.classList.add('off');
-    btn.textContent = '…';
-
-    const wordCount = full.replace(/\n/g, ' ').trim().split(/\s+/).length;
-    if (wordCount <= 3) {
-        const s = document.createElement('div');
-        s.className = 'bubble sys';
-        s.innerHTML = `<span style="color:var(--t3)"><em>Đang chờ thêm ngữ cảnh... (mới có ${wordCount} từ)</em></span>`;
-        box.appendChild(s);
-        box.scrollTop = box.scrollHeight;
-        btn.classList.remove('off');
-        btn.textContent = 'Gửi';
-        return; 
+    function toggleTheme() {
+        isLight = !isLight;
+        document.body.classList.toggle('light', isLight);
+        document.getElementById('themeBtn').textContent = isLight ? '☾' : '☀';
     }
 
-    if (ws && ws.readyState === 1) {
-        ws.send(full);
-        const once = e => {
-            const d = JSON.parse(e.data);
-            const calcAvg = (arr) => {
-                if (!arr || arr.length === 0) return 0;
-                const sum = arr.reduce((acc, curr) => acc + curr.score, 0);
-                return parseFloat((sum / arr.length).toFixed(1));
-            };
+    function switchTab(viewId, btn) {
+        document.querySelectorAll('.view-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.t-btn').forEach(el => el.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+        btn.classList.add('active');
+    }
 
-            const sc = {
-                'tao_lao': calcAvg(d.top?.tao_lao),
-                'crawl_data': calcAvg(d.top?.crawl_data),
-                'binh_thuong': calcAvg(d.top?.binh_thuong)
-            };
+    function init() {
+        ws = new WebSocket(`ws://${location.host}/ws/calculate`);
+        ws.onopen = () => {
+            document.getElementById('dot').classList.add('on');
+            document.getElementById('conn').textContent = 'Live';
+        };
+        ws.onclose = () => {
+            document.getElementById('dot').classList.remove('on');
+            document.getElementById('conn').textContent = 'Reconnect';
+            setTimeout(init, 2000);
+        };
+    }
 
-            const pred = Object.entries(sc).sort((a, b) => b[1] - a[1])[0];
-            const lm = LM[pred[0]];
-            const labelNames = { 'binh_thuong': 'Bình Thường', 'crawl_data': 'Crawl Data', 'tao_lao': 'Tào Lao' };
-            const displayName = labelNames[pred[0]];
-            const col = pred[0] === 'binh_thuong' ? 'var(--green)' : pred[0] === 'crawl_data' ? 'var(--blue)' : 'var(--red)';
+    async function send() {
+        const inp = document.getElementById('inp');
+        const t = inp.value.trim();
+        if (!t) return;
 
+        H.push(t);
+        const full = H.join('\n');
+        document.getElementById('msgN').textContent = H.length;
+
+        const box = document.getElementById('msgs');
+        const emp = box.querySelector('.empty');
+        if (emp) emp.remove();
+
+        const m = document.createElement('div');
+        m.className = 'bubble me';
+        m.textContent = t;
+        box.appendChild(m);
+        box.scrollTop = box.scrollHeight;
+
+        inp.value = '';
+        inp.style.height = 'auto';
+
+        const btn = document.getElementById('btn');
+        btn.classList.add('off');
+        btn.textContent = '…';
+
+        const wordCount = full.replace(/\n/g, ' ').trim().split(/\s+/).length;
+        if (wordCount <= 3) {
             const s = document.createElement('div');
             s.className = 'bubble sys';
-            s.innerHTML = `<strong style="color:${col}">${displayName}</strong> ${pred[1]}%`;
+            s.innerHTML = `<span style="color:var(--t3)"><em>Đang chờ thêm ngữ cảnh... (mới có ${wordCount} từ)</em></span>`;
             box.appendChild(s);
             box.scrollTop = box.scrollHeight;
-
-            addHist(full, d, pred, lm, sc);
             btn.classList.remove('off');
             btn.textContent = 'Gửi';
-            ws.removeEventListener('message', once);
-        };
-        ws.addEventListener('message', once);
-    }
-
-    try {
-        await fetch('/submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: t, full_conversation: full })
-        });
-    } catch (e) {}
-}
-
-function addHist(text, d, pred, lm, sc) {
-    const el = document.getElementById('hList');
-    const emp = el.querySelector('.h-empty');
-    if (emp) emp.remove();
-    document.getElementById('hN').textContent = ++N;
-
-    const div = document.createElement('div');
-    div.className = 'h-entry';
-    div.innerHTML = `
-        <div class="h-top">
-            <span class="h-badge ${lm.c}">${pred[0]}</span>
-        </div>
-        <div class="h-text">${text.replace(/\n/g, '<br>')}</div>
-        <div class="h-bars">
-            <div class="h-bar"><span class="h-bar-label">BT</span><div class="h-bar-track"><div class="h-bar-fill g" style="width:${sc.binh_thuong || 0}%"></div></div></div>
-            <div class="h-bar"><span class="h-bar-label">CD</span><div class="h-bar-track"><div class="h-bar-fill b" style="width:${sc.crawl_data || 0}%"></div></div></div>
-            <div class="h-bar"><span class="h-bar-label">TL</span><div class="h-bar-track"><div class="h-bar-fill r" style="width:${sc.tao_lao || 0}%"></div></div></div>
-        </div>`;
-    el.insertBefore(div, el.firstChild);
-}
-
-// ---- MANAGE TAB LOGIC ----
-async function loadManageHistory() {
-    const list = document.getElementById('mList');
-    list.innerHTML = `<div class="h-empty"><p>Đang tải dữ liệu...</p></div>`;
-    try {
-        const res = await fetch('/api/history');
-        const data = await res.json();
-        
-        if (!data || data.length === 0) {
-            list.innerHTML = `<div class="h-empty"><p>Chưa có dữ liệu</p></div>`;
-            return;
+            return; 
         }
 
-        list.innerHTML = '';
-        data.forEach((item, index) => {
-            const div = document.createElement('div');
-            div.className = 'm-item';
-            div.id = `m-item-${index}`;
-            div.innerHTML = `
-                <div class="m-meta">
-                    <span>Dự đoán cũ: <strong>${item.predicted_label || 'N/A'}</strong></span>
-                    <span>${new Date(item.timestamp).toLocaleString('vi-VN')}</span>
-                </div>
-                <div class="h-text" style="color:var(--t1)">${item.full_conversation.replace(/\n/g, '<br>')}</div>
-                <div class="m-actions">
-                    <button class="m-btn btn-g" onclick="relabel('${encodeURIComponent(item.full_conversation)}', 'BINH_THUONG', 'm-item-${index}')">✅ Đánh dấu: Bình Thường</button>
-                    <button class="m-btn btn-b" onclick="relabel('${encodeURIComponent(item.full_conversation)}', 'CRAWL_DATA', 'm-item-${index}')">🤖 Đánh dấu: Crawl Data</button>
-                    <button class="m-btn btn-r" onclick="relabel('${encodeURIComponent(item.full_conversation)}', 'TAO_LAO', 'm-item-${index}')">❌ Đánh dấu: Tào Lao</button>
-                </div>
-            `;
-            list.appendChild(div);
-        });
-    } catch (e) {
-        list.innerHTML = `<div class="h-empty"><p style="color:var(--red)">Lỗi khi tải dữ liệu!</p></div>`;
-    }
-}
+        if (ws && ws.readyState === 1) {
+            ws.send(full);
+            const once = e => {
+                const d = JSON.parse(e.data);
+                const calcAvg = (arr) => {
+                    if (!arr || arr.length === 0) return 0;
+                    const sum = arr.reduce((acc, curr) => acc + curr.score, 0);
+                    return parseFloat((sum / arr.length).toFixed(1));
+                };
 
-async function relabel(encodedText, newLabel, elId) {
-    const text = decodeURIComponent(encodedText);
-    const btnBox = document.querySelector(`#${elId} .m-actions`);
-    btnBox.innerHTML = `<span style="font-size:11px; color:var(--amber);">Đang lưu vào Vector DB & File...</span>`;
-    
-    try {
-        const res = await fetch('/api/relabel', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ full_conversation: text, new_label: newLabel })
-        });
-        const data = await res.json();
-        
-        if (data.status === "ok") {
-            btnBox.innerHTML = `<span style="font-size:12px; color:var(--green); font-weight:500;">✓ Đã cập nhật nhãn <b>${newLabel}</b> thành công!</span>`;
-            setTimeout(() => document.getElementById(elId).style.display = 'none', 1500);
-        } else {
-            btnBox.innerHTML = `<span style="font-size:12px; color:var(--red);">Lỗi: ${data.error}</span>`;
+                const sc = {
+                    'tao_lao': calcAvg(d.top?.tao_lao),
+                    'crawl_data': calcAvg(d.top?.crawl_data),
+                    'binh_thuong': calcAvg(d.top?.binh_thuong)
+                };
+
+                const pred = Object.entries(sc).sort((a, b) => b[1] - a[1])[0];
+                const lm = LM[pred[0]];
+                const labelNames = { 'binh_thuong': 'Bình Thường', 'crawl_data': 'Crawl Data', 'tao_lao': 'Tào Lao' };
+                const displayName = labelNames[pred[0]];
+                const col = pred[0] === 'binh_thuong' ? 'var(--green)' : pred[0] === 'crawl_data' ? 'var(--blue)' : 'var(--red)';
+
+                const s = document.createElement('div');
+                s.className = 'bubble sys';
+                s.innerHTML = `<strong style="color:${col}">${displayName}</strong> ${pred[1]}%`;
+                box.appendChild(s);
+                box.scrollTop = box.scrollHeight;
+
+                addHist(full, d, pred, lm, sc);
+                btn.classList.remove('off');
+                btn.textContent = 'Gửi';
+                ws.removeEventListener('message', once);
+            };
+            ws.addEventListener('message', once);
         }
-    } catch (e) {
-        btnBox.innerHTML = `<span style="font-size:12px; color:var(--red);">Lỗi kết nối Server</span>`;
-    }
-}
 
-document.getElementById('inp').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-});
-document.getElementById('inp').addEventListener('input', function () {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 130) + 'px';
-});
-document.addEventListener('DOMContentLoaded', init);
+        try {
+            const response = await fetch('/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    id: currentChatId, // Gửi ID hiện tại (lần đầu là null)
+                    text: t, 
+                    full_conversation: full 
+                })
+            });
+            const result = await response.json();
+            if (result.id) {
+                currentChatId = result.id; // Lưu lại ID Server trả về để dùng cho câu sau
+            }
+        } catch (e) {}
+    }
+
+    function addHist(text, d, pred, lm, sc) {
+        const el = document.getElementById('hList');
+        const emp = el.querySelector('.h-empty');
+        if (emp) emp.remove();
+        document.getElementById('hN').textContent = ++N;
+
+        const div = document.createElement('div');
+        div.className = 'h-entry';
+        div.innerHTML = `
+            <div class="h-top">
+                <span class="h-badge ${lm.c}">${pred[0]}</span>
+            </div>
+            <div class="h-text">${text.replace(/\n/g, '<br>')}</div>
+            <div class="h-bars">
+                <div class="h-bar"><span class="h-bar-label">BT</span><div class="h-bar-track"><div class="h-bar-fill g" style="width:${sc.binh_thuong || 0}%"></div></div></div>
+                <div class="h-bar"><span class="h-bar-label">CD</span><div class="h-bar-track"><div class="h-bar-fill b" style="width:${sc.crawl_data || 0}%"></div></div></div>
+                <div class="h-bar"><span class="h-bar-label">TL</span><div class="h-bar-track"><div class="h-bar-fill r" style="width:${sc.tao_lao || 0}%"></div></div></div>
+            </div>`;
+        el.insertBefore(div, el.firstChild);
+    }
+
+    // ---- MANAGE TAB LOGIC ----
+    async function loadManageHistory() {
+        const list = document.getElementById('mList');
+        list.innerHTML = `<div class="h-empty"><p>Đang tải dữ liệu...</p></div>`;
+        try {
+            // Thêm timestamp và no-store để ép trình duyệt luôn lấy dữ liệu mới nhất từ Server
+            const res = await fetch('/api/history?t=' + new Date().getTime(), { cache: 'no-store' });
+            const data = await res.json();
+            
+            if (!data || data.length === 0) {
+                list.innerHTML = `<div class="h-empty"><p>Chưa có dữ liệu</p></div>`;
+                return;
+            }
+
+            list.innerHTML = '';
+            data.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'm-item';
+                div.id = `m-item-${index}`;
+                
+                // THÊM DÒNG NÀY: Mã hóa an toàn tuyệt đối kể cả dấu nháy đơn
+                const safeText = encodeURIComponent(item.full_conversation).replace(/'/g, "%27");
+                
+                div.innerHTML = `
+                    <div class="m-meta">
+                        <span>#${item.id || '?'} | Dự đoán cũ: <strong>${item.predicted_label || 'N/A'}</strong></span>
+                        <span>${new Date(item.timestamp).toLocaleString('vi-VN')}</span>
+                    </div>
+                    <div class="h-text" style="color:var(--t1)">${item.full_conversation.replace(/\n/g, '<br>')}</div>
+                    <div class="m-actions">
+                        <button class="m-btn btn-g" onclick="relabel('${safeText}', 'binh_thuong', 'm-item-${index}')">✅ Đánh dấu: Bình Thường</button>
+                        <button class="m-btn btn-b" onclick="relabel('${safeText}', 'crawl_data', 'm-item-${index}')">🤖 Đánh dấu: Crawl Data</button>
+                        <button class="m-btn btn-r" onclick="relabel('${safeText}', 'tao_lao', 'm-item-${index}')">❌ Đánh dấu: Tào Lao</button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+        } catch (e) {
+            list.innerHTML = `<div class="h-empty"><p style="color:var(--red)">Lỗi khi tải dữ liệu!</p></div>`;
+        }
+    }
+
+    async function loadReviewedHistory() {
+        const list = document.getElementById('rList');
+        list.innerHTML = `<div class="h-empty"><p>Đang tải dữ liệu...</p></div>`;
+        try {
+            // Gọi API mới tạo, chống cache
+            const res = await fetch('/api/reviewed_history?t=' + new Date().getTime(), { cache: 'no-store' });
+            const data = await res.json();
+            
+            if (!data || data.length === 0) {
+                list.innerHTML = `<div class="h-empty"><p>Chưa có dữ liệu nào được kiểm tra</p></div>`;
+                return;
+            }
+
+            list.innerHTML = '';
+            data.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'm-item';
+                div.id = `r-item-${index}`; // Tạo ID duy nhất cho khung này
+                
+                const safeText = encodeURIComponent(item.full_conversation).replace(/'/g, "%27");
+                
+                div.innerHTML = `
+                    <div class="m-meta">
+                        <span>#${item.id || '?'} | Nhãn chốt: <strong style="color:var(--amber)">${item.predicted_label || 'N/A'}</strong></span>
+                        <span>${new Date(item.timestamp).toLocaleString('vi-VN')}</span>
+                    </div>
+                    <div class="h-text" style="color:var(--t1)">${item.full_conversation.replace(/\n/g, '<br>')}</div>
+                    <div class="m-actions">
+                        <span style="font-size: 11px; color: var(--t3); align-self: center; margin-right: 6px;">Sửa lại nhãn:</span>
+                        <button class="m-btn btn-g" onclick="relabel('${safeText}', 'binh_thuong', 'r-item-${index}')">✅ Bình Thường</button>
+                        <button class="m-btn btn-b" onclick="relabel('${safeText}', 'crawl_data', 'r-item-${index}')">🤖 Crawl Data</button>
+                        <button class="m-btn btn-r" onclick="relabel('${safeText}', 'tao_lao', 'r-item-${index}')">❌ Tào Lao</button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+        } catch (e) {
+            list.innerHTML = `<div class="h-empty"><p style="color:var(--red)">Lỗi khi tải dữ liệu!</p></div>`;
+        }
+    }
+
+    async function relabel(encodedText, newLabel, elId) {
+        const text = decodeURIComponent(encodedText);
+        const btnBox = document.querySelector(`#${elId} .m-actions`);
+        btnBox.innerHTML = `<span style="font-size:11px; color:var(--amber);">Đang lưu vào Vector DB & File...</span>`;
+        
+        try {
+            const res = await fetch('/api/relabel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ full_conversation: text, new_label: newLabel })
+            });
+            const data = await res.json();
+            
+            if (data.status === "ok") {
+                btnBox.innerHTML = `<span style="font-size:12px; color:var(--green); font-weight:500;">✓ Đã cập nhật nhãn <b>${newLabel}</b> thành công!</span>`;
+                setTimeout(() => document.getElementById(elId).style.display = 'none', 1500);
+            } else {
+                btnBox.innerHTML = `<span style="font-size:12px; color:var(--red);">Lỗi: ${data.error}</span>`;
+            }
+        } catch (e) {
+            btnBox.innerHTML = `<span style="font-size:12px; color:var(--red);">Lỗi kết nối Server</span>`;
+        }
+    }
+
+    document.getElementById('inp').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    document.getElementById('inp').addEventListener('input', function () {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 130) + 'px';
+    });
+    document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>

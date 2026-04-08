@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, Request
+from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import numpy as np
@@ -18,9 +18,8 @@ from src.test.test import (
     predict_3_class
 )
 
-
 load_dotenv()
-TOP_K_CONFIG = int(os.getenv("TOP_K"))
+TOP_K_CONFIG = int(os.getenv("TOP_K", 2))
 
 # --- SETUP SQLITE VEC ---
 # 1. Khởi tạo kết nối và load extension sqlite-vec
@@ -30,12 +29,10 @@ sqlite_vec.load(db_conn)
 db_conn.enable_load_extension(False)
 
 # 2. Lấy số chiều (dimension) của model embedding một cách linh động
-# Nếu bạn dùng Qwen3-0.6B thì thường là 1024 hoặc 1536
 sample_vec = embeddings.embed_query("test")
 embed_dim = len(sample_vec)
 
 # 3. Tạo bảng VIRTUAL chứa vector và text
-# Sử dụng dấu + trước 'text' để định nghĩa auxiliary column lưu trữ metadata song song với vector
 db_conn.execute(f'''
     CREATE VIRTUAL TABLE IF NOT EXISTS history_vectors 
     USING vec0(
@@ -49,7 +46,6 @@ db_conn.commit()
 vector_store = SQLiteVec(table="history_vectors", connection=db_conn, embedding=embeddings)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 
 app = FastAPI(title="Multi Dataset Similarity Visualizer")
 
@@ -71,7 +67,6 @@ datasets = {
     }
 }
 
-
 @app.on_event("startup")
 async def preload_all_datasets():
     print("🔄 Đang precompute embeddings cho 3 dataset...")
@@ -80,8 +75,12 @@ async def preload_all_datasets():
         print(f"⚡ Đang xử lý {name}...")
         ds['data'] = read_jsonl(ds['path'], deduplicate=True)
         messages = [item['conversation'] for item in ds['data'] if item['conversation'].strip()]
-        ds['embeddings'] = embeddings.embed_documents(messages)
-        print(f"✅ {name}: {len(ds['embeddings'])} vectors")
+        if messages:
+            ds['embeddings'] = embeddings.embed_documents(messages)
+            print(f"✅ {name}: {len(ds['embeddings'])} vectors")
+        else:
+            ds['embeddings'] = []
+            print(f"⚠️ {name}: 0 vectors (Dataset rỗng)")
 
     print("✅ Tất cả dataset đã sẵn sàng!")
 
@@ -93,7 +92,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             raw = await websocket.receive_text()
 
-            # --- BẮT ĐẦU CẬP NHẬT: Xử lý chuỗi ---
+            # --- Xử lý chuỗi ---
             try:
                 payload = json.loads(raw)
                 if isinstance(payload, dict) and "messages" in payload:
@@ -115,22 +114,22 @@ async def websocket_endpoint(websocket: WebSocket):
             formatted_lines = [f"Customer: {m.strip()}" for m in lines if m.strip()]
             full_conversation = "\n".join(formatted_lines)
             last_message = formatted_lines[-1] if formatted_lines else ""
-            # --- KẾT THÚC CẬP NHẬT ---
 
             # 1. Dự đoán điểm tổng quát bằng Centroid (Trọng số 50% Last - 50% Full)
             if len(formatted_lines) > 1:
                 _, scores_full = predict_3_class(full_conversation)
                 _, scores_last = predict_3_class(last_message)
                 
-                scores = {
-                    "TAO_LAO": 0.5 * scores_full.get("TAO_LAO", 0) + 0.5 * scores_last.get("TAO_LAO", 0),
-                    "CRAWL_DATA": 0.5 * scores_full.get("CRAWL_DATA", 0) + 0.5 * scores_last.get("CRAWL_DATA", 0),
-                    "BINH_THUONG": 0.5 * scores_full.get("BINH_THUONG", 0) + 0.5 * scores_last.get("BINH_THUONG", 0)
-                }
+                scores_tao_lao = 0.5 * scores_full.get("TAO_LAO", 0) + 0.5 * scores_last.get("TAO_LAO", 0)
+                scores_crawl_data = 0.5 * scores_full.get("CRAWL_DATA", 0) + 0.5 * scores_last.get("CRAWL_DATA", 0)
+                scores_binh_thuong = 0.5 * scores_full.get("BINH_THUONG", 0) + 0.5 * scores_last.get("BINH_THUONG", 0)
             else:
-                _, scores = predict_3_class(full_conversation)
+                _, scores_raw = predict_3_class(full_conversation)
+                scores_tao_lao = scores_raw.get("TAO_LAO", 0)
+                scores_crawl_data = scores_raw.get("CRAWL_DATA", 0)
+                scores_binh_thuong = scores_raw.get("BINH_THUONG", 0)
 
-            # 2. Tìm Top K câu giống nhất trong từng dataset
+            # 2. Tìm Top K câu giống nhất
             top_results = {"tao_lao": [], "crawl_data": [], "binh_thuong": []}
             
             try:
@@ -139,7 +138,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 norm_full = np.linalg.norm(query_emb_full)
                 norm_query_full = query_emb_full / norm_full if norm_full > 0 else query_emb_full
                 
-                # Embed câu Last Message (nếu có nhiều hơn 1 câu)
+                # Embed câu Last Message
                 if len(formatted_lines) > 1:
                     query_emb_last = np.array(embeddings.embed_query(last_message))
                     norm_last = np.linalg.norm(query_emb_last)
@@ -154,10 +153,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         norms = np.where(norms == 0, 1, norms)
                         norm_mat = mat / norms
                         
-                        # Tính Cosine Similarity của Full
+                        # Tính Cosine Similarity
                         sims_full = np.dot(norm_mat, norm_query_full)
                         
-                        # Tính Cosine Similarity của Last và Mix 50-50
                         if len(formatted_lines) > 1:
                             sims_last = np.dot(norm_mat, norm_query_last)
                             sims = 0.5 * sims_full + 0.5 * sims_last
@@ -176,86 +174,122 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "score": round(float(sims[idx]) * 100, 1)
                             })
             except Exception as e:
-                print(f"Lỗi khi tính Top 유사 (Similarity): {e}")
+                print(f"Lỗi khi tính Top Similarity: {e}")
 
-            # 3. Trả kết quả về cho Frontend
+            # 3. Trả kết quả về cho Frontend (Chuẩn hóa lowercase)
             result = {
-                "tao_lao": scores.get("TAO_LAO", 0),
-                "crawl_data": scores.get("CRAWL_DATA", 0),
-                "binh_thuong": scores.get("BINH_THUONG", 0),
+                "tao_lao": scores_tao_lao,
+                "crawl_data": scores_crawl_data,
+                "binh_thuong": scores_binh_thuong,
                 "top": top_results,
                 "detail": {}
             }
 
             await websocket.send_json(result)
 
+    except WebSocketDisconnect:
+        print("💡 Client đã ngắt kết nối WebSocket (Reload/Đóng tab).")
     except Exception as e:
-        print(f"WebSocket error: {e}")
-    finally:
-        await websocket.close()
+        print(f"❌ WebSocket error: {e}")
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
+
+# 1. Thêm Optional vào import để handle id có thể null
+from typing import Optional 
 
 class ChatSubmit(BaseModel):
+    id: Optional[int] = None # Thêm trường ID
     text: str
     full_conversation: str
 
 @app.post("/submit")
 async def submit_chat_message(data: ChatSubmit):
-    # Tách các dòng, lấy dòng cuối và format toàn bộ
     lines = data.full_conversation.split('\n')
-    
-    # --- MỚI: Đếm số từ trước khi xử lý (bỏ qua nếu <= 3 từ) ---
     raw_text = " ".join([line.strip() for line in lines if line.strip()])
+    
     if len(raw_text.split()) <= 3:
-        return {"status": "skipped", "message": "Input quá ngắn (<= 3 từ), bỏ qua dự đoán."}
-    # ------------------------------------------------------------
+        return {"status": "skipped", "message": "Input quá ngắn."}
 
     formatted_lines = [f"Customer: {line.strip()}" for line in lines if line.strip()]
     formatted_full_conversation = "\n".join(formatted_lines)
     last_message = formatted_lines[-1] if formatted_lines else ""
 
-    # Tính điểm 50% Full - 50% Last
+    # Tính toán score và label
     if len(formatted_lines) > 1:
         _, scores_full = predict_3_class(formatted_full_conversation)
         _, scores_last = predict_3_class(last_message)
-        
         scores = {
-            "TAO_LAO": 0.5 * scores_full.get("TAO_LAO", 0) + 0.5 * scores_last.get("TAO_LAO", 0),
-            "CRAWL_DATA": 0.5 * scores_full.get("CRAWL_DATA", 0) + 0.5 * scores_last.get("CRAWL_DATA", 0),
-            "BINH_THUONG": 0.5 * scores_full.get("BINH_THUONG", 0) + 0.5 * scores_last.get("BINH_THUONG", 0)
+            "tao_lao": 0.5 * scores_full.get("TAO_LAO", 0) + 0.5 * scores_last.get("TAO_LAO", 0),
+            "crawl_data": 0.5 * scores_full.get("CRAWL_DATA", 0) + 0.5 * scores_last.get("CRAWL_DATA", 0),
+            "binh_thuong": 0.5 * scores_full.get("BINH_THUONG", 0) + 0.5 * scores_last.get("BINH_THUONG", 0)
         }
-        predicted_label = max(scores, key=scores.get) if scores else "UNKNOWN"
+        predicted_label = max(scores, key=scores.get)
     else:
-        predicted_label, scores = predict_3_class(formatted_full_conversation)
+        raw_pred, raw_scores = predict_3_class(formatted_full_conversation)
+        scores = {"tao_lao": raw_scores.get("TAO_LAO", 0), "crawl_data": raw_scores.get("CRAWL_DATA", 0), "binh_thuong": raw_scores.get("BINH_THUONG", 0)}
+        predicted_label = raw_pred.lower()
 
-    # --- LƯU VÀO JSONL (GIỮ NGUYÊN) ---
-    log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "text": "Customer: " + data.text,
-        "full_conversation": formatted_full_conversation,
-        "scores": {
-            "TAO_LAO": scores.get("TAO_LAO", 0),
-            "BINH_THUONG": scores.get("BINH_THUONG", 0),
-            "CRAWL_DATA": scores.get("CRAWL_DATA", 0)
-        },
-        "predicted_label": predicted_label
-    }
     log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    
+    target_id = data.id
+    all_entries = []
+    
+    # Đọc file để kiểm tra ID hoặc tạo ID mới
+    if os.path.exists(log_file):
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip(): continue
+                try:
+                    all_entries.append(json.loads(line))
+                except Exception:
+                    pass # Bỏ qua các dòng rác/lỗi do test cũ để lại
 
-    # --- MỚI: LƯU VÀO SQLITE VEC ---
+    # LOGIC CẬP NHẬT HOẶC THÊM MỚI (An toàn khi lấy Max ID)
+    new_entry = {
+        "id": target_id if target_id else (max([int(e.get('id') or 0) for e in all_entries] + [0]) + 1),
+        "timestamp": datetime.utcnow().isoformat(),
+        "full_conversation": formatted_full_conversation,
+        "predicted_label": predicted_label,
+        "scores": scores,
+        "is_reviewed": False  # <--- THÊM DÒNG NÀY: Mặc định chưa đánh giá
+    }
+
+    if target_id:
+        # Tìm và thay thế entry cũ có cùng ID
+        found = False
+        for i, entry in enumerate(all_entries):
+            if entry.get("id") == target_id:
+                all_entries[i] = new_entry
+                found = True
+                break
+        if not found: all_entries.append(new_entry)
+    else:
+        all_entries.append(new_entry)
+
+    # Ghi lại toàn bộ file JSONL (Đảm bảo ID cũ được cập nhật nội dung mới nhất)
+    with open(log_file, "w", encoding="utf-8") as f:
+        for entry in all_entries:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # Cập nhật SQLite Vector: Xóa vector cũ của ID này và chèn bản mới nhất
     try:
-        # Bạn có thể lưu full_conversation hoặc kết hợp label vào text tùy mục đích search sau này
+        # Nếu đang update chat cũ thì mới xóa vector cũ (Thêm dấu cách sau ID để tránh xóa nhầm 1 thành 10, 11)
+        if target_id is not None:
+            db_conn.execute("DELETE FROM history_vectors WHERE text LIKE ?", (f"%ID:{target_id} %",)) 
+            
+        # Thêm vector mới với format có ID rõ ràng
         doc = Document(
-            page_content=f"[{predicted_label}] {formatted_full_conversation}", 
-            metadata={"label": predicted_label} # Tạm thời metadata chưa lưu vào SQLite theo class của bạn, nhưng cứ gói vào cho chuẩn cấu trúc
+            page_content=f"[{predicted_label}] ID:{new_entry['id']} {formatted_full_conversation}", 
+            metadata={"label": predicted_label, "id": new_entry['id']}
         )
         vector_store.add_documents([doc])
-        print(f"✅ Đã lưu vector thành công vào SQLiteVec: {predicted_label}")
+        db_conn.commit()
     except Exception as e:
-        print(f"❌ Lỗi khi lưu vào SQLiteVec: {e}")
+        print(f"❌ SQLite Error: {e}")
 
-    return {"status": "ok", "logged": True}
+    return {"status": "ok", "id": new_entry['id']}
 
 # ==========================================
 # CÁC API CHO TAB QUẢN LÝ DỮ LIỆU
@@ -263,8 +297,8 @@ async def submit_chat_message(data: ChatSubmit):
 
 @app.get("/api/history")
 async def get_history():
-    """Lấy danh sách 50 log gần nhất từ file jsonl"""
-    history_data = []
+    """Lấy danh sách log gần nhất, tự động gộp các đoạn chat bị lặp và ẨN các đoạn đã đánh giá"""
+    raw_history = []
     log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
     
     if os.path.exists(log_file):
@@ -272,67 +306,174 @@ async def get_history():
             for line in f:
                 if line.strip():
                     try:
-                        history_data.append(json.loads(line))
+                        item = json.loads(line)
+                        # --- MỚI: Chỉ lấy những câu chưa được review (False hoặc chưa có field này) ---
+                        if not item.get("is_reviewed", False):
+                            raw_history.append(item)
                     except:
                         pass
-    # Trả về 50 dòng mới nhất (đảo ngược mảng)
-    return history_data[::-1][:50]
+                        
+    # Đảo ngược mảng để xét từ tin nhắn mới nhất (hoàn chỉnh nhất) trở về trước
+    raw_history = raw_history[::-1]
+    
+    filtered_history = []
+    for item in raw_history:
+        current_text = item.get("full_conversation", "")
+        
+        is_subset = False
+        for kept_item in filtered_history:
+            kept_text = kept_item.get("full_conversation", "")
+            
+            # Nếu đoạn text hiện tại trùng khớp hoàn toàn 
+            # HOẶC là phần đầu của một đoạn text khác đã được giữ lại (cách nhau bởi \n)
+            if kept_text == current_text or kept_text.startswith(current_text + "\n"):
+                is_subset = True
+                break
+                
+        # Nếu không bị trùng lặp/nằm trong đoạn dài hơn, thì đưa vào danh sách hiển thị
+        if not is_subset:
+            filtered_history.append(item)
+            
+    # Trả về tối đa 50 đoạn hội thoại đã được lọc sạch và CHƯA ĐÁNH GIÁ
+    return filtered_history[:50]
 
 class RelabelRequest(BaseModel):
     full_conversation: str
-    new_label: str # Nhận: BINH_THUONG, TAO_LAO, CRAWL_DATA
+    new_label: str # Nhận trực tiếp: binh_thuong, tao_lao, crawl_data
 
 @app.post("/api/relabel")
 async def relabel_message(req: RelabelRequest):
     """
-    Khi user bấm lưu nhãn mới:
-    1. Ghi vào file {nhãn_mới}.jsonl
-    2. Cập nhật thẳng vào SQLite Vector
-    3. Push trực tiếp vào RAM (biến datasets) để sử dụng được ngay lập tức
+    Cập nhật toàn diện khi người dùng thay đổi nhãn:
+    1. Sửa 'predicted_label' trong user_submitted_messages.jsonl (Để UI hiển thị đúng)
+    2. Xóa dữ liệu khỏi các file nhãn sai (data/tao-lao.jsonl, v.v.)
+    3. Thêm dữ liệu vào file nhãn đúng (data/binh-thuong.jsonl, v.v.)
+    4. Đồng bộ lại SQLite Vector Store
     """
-    label_map = {
-        "BINH_THUONG": "binh_thuong",
-        "TAO_LAO": "tao_lao",
-        "CRAWL_DATA": "crawl_data"
-    }
-    
-    ds_key = label_map.get(req.new_label)
-    if not ds_key: 
-        return {"status": "error", "error": "Nhãn không hợp lệ."}
+    target_label = req.new_label # Ví dụ: 'binh_thuong'
+    conv_text = req.full_conversation
 
-    # 1. Cập nhật vào File JSONL tương ứng của nhãn đó
-    target_ds = datasets[ds_key]
-    new_entry = {
-        "conversation": req.full_conversation,
-        # Nếu data của bạn cần các key khác thì thêm ở đây
-    }
+    # --- 1. CẬP NHẬT FILE LOG TỔNG (user_submitted_messages.jsonl) ---
+    log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
+    if os.path.exists(log_file):
+        updated_logs = []
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip(): continue
+                try:
+                    entry = json.loads(line)
+                    # Tìm đúng đoạn hội thoại để đổi nhãn
+                    if entry.get("full_conversation") == conv_text:
+                        entry["predicted_label"] = target_label
+                        entry["is_reviewed"] = True # <--- THÊM DÒNG NÀY: Đánh dấu đã duyệt xong
+                    updated_logs.append(entry)
+                except: continue
+        
+        # Ghi đè lại file log tổng với nhãn đã sửa
+        with open(log_file, "w", encoding="utf-8") as f:
+            for entry in updated_logs:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # --- 2. XÓA KHỎI CÁC NHÃN SAI (Dọn dẹp các file dataset lẻ) ---
+    for name, ds in datasets.items():
+        if name != target_label:
+            # Tìm và loại bỏ câu này khỏi RAM và File của các nhãn không liên quan
+            original_data = ds['data']
+            new_data = [item for item in original_data if item.get('conversation') != conv_text]
+            
+            if len(new_data) < len(original_data):
+                # Nếu có sự thay đổi (đã tìm thấy và xóa), cập nhật lại RAM và ghi đè File
+                ds['data'] = new_data
+                # Cập nhật lại embeddings trong RAM (nếu có)
+                if ds['embeddings']:
+                    ds['embeddings'] = embeddings.embed_documents([x['conversation'] for x in new_data])
+                
+                with open(ds['path'], "w", encoding="utf-8") as f:
+                    for item in new_data:
+                        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    # --- 3. THÊM VÀO NHÃN ĐÚNG (Dataset lẻ mục tiêu) ---
+    target_ds = datasets[target_label]
+    exists_in_target = any(item.get('conversation') == conv_text for item in target_ds['data'])
     
-    try:
-        with open(target_ds['path'], 'a', encoding='utf-8') as f:
+    if not exists_in_target:
+        # Tạo ID mới tự tăng cho dataset này
+        new_id = 1
+        if target_ds['data']:
+            try:
+                new_id = max([int(it.get('id', 0)) for it in target_ds['data']]) + 1
+            except:
+                new_id = len(target_ds['data']) + 1
+
+        new_entry = {"id": new_id, "conversation": conv_text}
+        
+        # Cập nhật RAM
+        target_ds['data'].append(new_entry)
+        new_emb = embeddings.embed_query(conv_text)
+        if target_ds['embeddings'] is not None:
+            target_ds['embeddings'].append(new_emb)
+        else:
+            target_ds['embeddings'] = [new_emb]
+
+        # Ghi nối vào file nhãn đúng
+        with open(target_ds['path'], "a", encoding="utf-8") as f:
             f.write(json.dumps(new_entry, ensure_ascii=False) + "\n")
-    except Exception as e:
-        return {"status": "error", "error": f"Lỗi ghi file: {str(e)}"}
 
-    # 2. Cập nhật vào SQLiteVec Database
+    # --- 4. ĐỒNG BỘ SQLITE VECTOR (Xóa cũ - Chèn mới) ---
     try:
+        # Xóa vector cũ dựa trên nội dung (text)
+        db_conn.execute("DELETE FROM history_vectors WHERE text LIKE ?", (f"%{conv_text}",))
+        
+        # Chèn vector mới với nhãn đã được đánh giá lại
+        # Format: [nhãn_mới] ID:x Nội dung...
         doc = Document(
-            page_content=f"[{req.new_label}] {req.full_conversation}", 
-            metadata={"label": req.new_label}
+            page_content=f"[{target_label}] {conv_text}", 
+            metadata={"label": target_label}
         )
         vector_store.add_documents([doc])
+        db_conn.commit()
     except Exception as e:
-        print(f"Lỗi SQLite trong lúc relabel: {e}")
-
-    # 3. Cập nhật RAM (Embeddings In-Memory) để chat tiếp theo khôn ra liền
-    try:
-        new_emb = embeddings.embed_query(req.full_conversation)
-        target_ds['embeddings'].append(new_emb)
-        target_ds['data'].append(new_entry)
-        print(f"✅ Đã huấn luyện thêm vào RAM & SQLite: {req.new_label}")
-    except Exception as e:
-        print(f"Lỗi lúc đưa vector vào RAM: {e}")
+        print(f"❌ Lỗi SQLite trong relabel: {e}")
 
     return {"status": "ok"}
+
+@app.get("/api/reviewed_history")
+async def get_reviewed_history():
+    """Lấy danh sách log ĐÃ ĐÁNH GIÁ từ file jsonl"""
+    raw_history = []
+    log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
+    
+    if os.path.exists(log_file):
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        item = json.loads(line)
+                        # CHỈ LẤY CÁC DÒNG ĐÃ REVIEW
+                        if item.get("is_reviewed", False):
+                            raw_history.append(item)
+                    except:
+                        pass
+                        
+    # Đảo ngược mảng để xét từ tin nhắn mới nhất
+    raw_history = raw_history[::-1]
+    
+    filtered_history = []
+    for item in raw_history:
+        current_text = item.get("full_conversation", "")
+        
+        is_subset = False
+        for kept_item in filtered_history:
+            kept_text = kept_item.get("full_conversation", "")
+            if kept_text == current_text or kept_text.startswith(current_text + "\n"):
+                is_subset = True
+                break
+                
+        if not is_subset:
+            filtered_history.append(item)
+            
+    # Trả về tối đa 50 đoạn hội thoại ĐÃ KIỂM TRA
+    return filtered_history[:50]
 
 @app.get("/")
 async def get_index():

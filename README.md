@@ -16,7 +16,7 @@ or
 python -m uvicorn visualization.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-<span style="color: #af0e4c; font-size: 18px; font-weight: bold;">RESULT</span>
+**RESULT**
 
 <between> ![alt text](data/image.png) </between>
 
