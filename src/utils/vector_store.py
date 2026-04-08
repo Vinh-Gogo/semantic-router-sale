@@ -1,6 +1,7 @@
 import os
 import re
 import pandas as pd
+import json
 
 import numpy as np
 # import faiss
@@ -166,6 +167,8 @@ def get_openai_embedding_base_url(base_url: str = 'http://localhost:8080') -> Op
         dimensions=1024
     )
 
+import numpy as np
+
 # ====================== CUSTOM SQLiteVec ======================
 class SQLiteVec:
     def __init__(self, table: str, connection, embedding):
@@ -177,17 +180,23 @@ class SQLiteVec:
         """Thêm documents vào SQLite Vec"""
         for doc in documents:
             vec = self.embedding.embed_query(doc.page_content)
+            
+            # Ép kiểu list thành numpy array float32, sau đó chuyển thành dạng bytes (BLOB)
+            vec_blob = np.array(vec, dtype=np.float32).tobytes()
+            
             self.connection.execute(
                 f"INSERT INTO {self.table} (text, text_embedding) VALUES (?, ?)",
-                (doc.page_content, vec)
+                (doc.page_content, vec_blob) 
             )
         self.connection.commit()
 
     def similarity_search_with_score(self, query: str, k: int = 10):
         """Tìm kiếm tương tự"""
-        import numpy as np
         query_vec = self.embedding.embed_query(query)
-        # Sử dụng vec_distance_cosine từ sqlite-vec
+        
+        # Tương tự, lúc tìm kiếm cũng phải convert câu query sang dạng bytes (BLOB)
+        query_blob = np.array(query_vec, dtype=np.float32).tobytes()
+        
         cursor = self.connection.execute(
             f"""
             SELECT text, vec_distance_cosine(text_embedding, ?) as distance
@@ -195,6 +204,6 @@ class SQLiteVec:
             ORDER BY distance
             LIMIT ? 
             """,
-            (np.array(query_vec, dtype=np.float32), k)
+            (query_blob, k)
         )
         return [(row[0], float(row[1])) for row in cursor.fetchall()]

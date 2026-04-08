@@ -32,246 +32,116 @@
             --input-bg:rgba(12,10,9,.02);
         }
 
-        body{
-            font-family:'Space Grotesk',sans-serif;
-            background:var(--bg);color:var(--t1);
-            min-height:100vh;transition:background .5s,color .5s;
-            overflow-x:hidden;
-        }
-        body::before{
-            content:'';position:fixed;top:-50%;left:-25%;
-            width:90%;height:90%;
-            background:radial-gradient(circle,var(--glow1) 0%,transparent 60%);
-            pointer-events:none;transition:background .5s;
-        }
-        body::after{
-            content:'';position:fixed;bottom:-40%;right:-20%;
-            width:80%;height:80%;
-            background:radial-gradient(circle,var(--glow2) 0%,transparent 55%);
-            pointer-events:none;transition:background .5s;
-        }
+        body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;transition:background .5s,color .5s;overflow-x:hidden;}
+        body::before{content:'';position:fixed;top:-50%;left:-25%;width:90%;height:90%;background:radial-gradient(circle,var(--glow1) 0%,transparent 60%);pointer-events:none;transition:background .5s;}
+        body::after{content:'';position:fixed;bottom:-40%;right:-20%;width:80%;height:80%;background:radial-gradient(circle,var(--glow2) 0%,transparent 55%);pointer-events:none;transition:background .5s;}
 
         .app{position:relative;z-index:1;max-width:740px;margin:0 auto;padding:40px 28px 56px}
 
         /* ── Header ── */
-        .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}
+        .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
         .brand{display:flex;align-items:center;gap:14px}
-        .brand-icon{
-            width:38px;height:38px;border-radius:10px;
-            background:linear-gradient(145deg,var(--amber),var(--amber2));
-            display:flex;align-items:center;justify-content:center;
-            font-family:'Instrument Serif',serif;font-weight:400;font-size:20px;
-            color:#0c0a09;box-shadow:0 0 24px rgba(245,158,11,.25);
-        }
+        .brand-icon{width:38px;height:38px;border-radius:10px;background:linear-gradient(145deg,var(--amber),var(--amber2));display:flex;align-items:center;justify-content:center;font-family:'Instrument Serif',serif;font-weight:400;font-size:20px;color:#0c0a09;box-shadow:0 0 24px rgba(245,158,11,.25);}
         .brand h1{font-family:'Instrument Serif',serif;font-size:22px;font-weight:400;letter-spacing:-.5px;color:var(--t1)}
         .brand span{font-family:'DM Mono',monospace;font-size:10px;color:var(--t3);letter-spacing:.8px;text-transform:uppercase}
 
         .header-right{display:flex;align-items:center;gap:10px}
-
-        .status{
-            display:flex;align-items:center;gap:7px;
-            padding:6px 14px;border-radius:20px;
-            background:var(--bg2);border:1px solid var(--border);
-            font-family:'DM Mono',monospace;font-size:10px;color:var(--t2);
-            transition:all .4s;letter-spacing:.3px;
-        }
+        .status{display:flex;align-items:center;gap:7px;padding:6px 14px;border-radius:20px;background:var(--bg2);border:1px solid var(--border);font-family:'DM Mono',monospace;font-size:10px;color:var(--t2);transition:all .4s;letter-spacing:.3px;}
         .pulse{width:6px;height:6px;border-radius:50%;background:var(--red);transition:all .3s}
         .pulse.on{background:var(--green);box-shadow:0 0 10px var(--green);animation:pulseAnim 2s infinite}
         @keyframes pulseAnim{0%,100%{opacity:1}50%{opacity:.3}}
 
-        .theme-btn{
-            width:38px;height:38px;border-radius:10px;border:1px solid var(--border);
-            background:var(--bg2);cursor:pointer;display:flex;align-items:center;justify-content:center;
-            font-size:18px;transition:all .3s;color:var(--t1);
-        }
+        .theme-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;transition:all .3s;color:var(--t1);}
         .theme-btn:hover{border-color:var(--border-h);background:var(--bg3);transform:scale(1.06)}
 
-        /* ── Glass Card ── */
-        .glass{
-            background:var(--bg2);border:1px solid var(--border);border-radius:18px;
-            backdrop-filter:blur(24px);transition:all .4s;
-        }
-        .glass:hover{border-color:var(--border-h);box-shadow:var(--card-shadow)}
+        /* ── TABS ── */
+        .tab-nav { display: flex; gap: 12px; margin-bottom: 24px; }
+        .t-btn { padding: 10px 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; color: var(--t2); cursor: pointer; transition: all 0.3s; font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500;}
+        .t-btn:hover { background: var(--bg3); border-color: var(--border-h); color: var(--t1); }
+        .t-btn.active { background: linear-gradient(145deg, var(--amber), var(--amber2)); color: #0c0a09; border-color: transparent; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.2); }
+        
+        .view-content { display: none; animation: fadeIn 0.4s ease; }
+        .view-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-        .card-head{
-            padding:16px 22px;border-bottom:1px solid var(--border);
-            display:flex;align-items:center;justify-content:space-between;transition:border-color .4s;
-        }
-        .card-head h3{
-            font-family:'DM Mono',monospace;font-size:11px;font-weight:500;
-            color:var(--t2);text-transform:uppercase;letter-spacing:1.2px;transition:color .4s;
-        }
-        .card-head .tag{
-            font-family:'DM Mono',monospace;font-size:9px;color:var(--t3);
-            background:var(--bg3);padding:3px 10px;border-radius:6px;transition:all .4s;
-        }
+        /* ── Glass Card ── */
+        .glass{background:var(--bg2);border:1px solid var(--border);border-radius:18px;backdrop-filter:blur(24px);transition:all .4s;}
+        .card-head{padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;transition:border-color .4s;}
+        .card-head h3{font-family:'DM Mono',monospace;font-size:11px;font-weight:500;color:var(--t2);text-transform:uppercase;letter-spacing:1.2px;}
+        .card-head .tag{font-family:'DM Mono',monospace;font-size:9px;color:var(--t3);background:var(--bg3);padding:3px 10px;border-radius:6px;}
 
         /* ── Chat ── */
         .chat-section{margin-bottom:24px}
-        .chat-section .glass{display:flex;flex-direction:column}
-
-        .msgs{
-            flex:1;min-height:240px;max-height:440px;
-            overflow-y:auto;overflow-x:hidden;
-            padding:18px 22px;display:flex;flex-direction:column;gap:12px;
-            scroll-behavior:smooth;
-        }
-        .msgs::-webkit-scrollbar{width:3px}
-        .msgs::-webkit-scrollbar-track{background:transparent}
-        .msgs::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-        .msgs::-webkit-scrollbar-thumb:hover{background:var(--border-h)}
-
-        .empty{
-            flex:1;display:flex;flex-direction:column;
-            align-items:center;justify-content:center;
-            color:var(--t3);font-size:13px;gap:6px;transition:color .4s;
-        }
+        .msgs{flex:1;min-height:240px;max-height:440px;overflow-y:auto;overflow-x:hidden;padding:18px 22px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth;}
+        .msgs::-webkit-scrollbar, .h-list::-webkit-scrollbar, .m-list::-webkit-scrollbar {width:3px}
+        .msgs::-webkit-scrollbar-track, .h-list::-webkit-scrollbar-track, .m-list::-webkit-scrollbar-track {background:transparent}
+        .msgs::-webkit-scrollbar-thumb, .h-list::-webkit-scrollbar-thumb, .m-list::-webkit-scrollbar-thumb {background:var(--border);border-radius:2px}
+        
+        .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--t3);font-size:13px;gap:6px;}
         .empty .ico{font-size:32px;opacity:.25;margin-bottom:6px}
         .empty p{font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:var(--t3)}
 
-        .bubble{
-            max-width:80%;padding:12px 18px;border-radius:18px;
-            font-size:13px;line-height:1.6;
-            animation:bubbleIn .35s cubic-bezier(.22,1,.36,1);
-        }
+        .bubble{max-width:80%;padding:12px 18px;border-radius:18px;font-size:13px;line-height:1.6;animation:bubbleIn .35s cubic-bezier(.22,1,.36,1);}
         @keyframes bubbleIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
-
-        .bubble.me{
-            align-self:flex-end;
-            background:linear-gradient(145deg,var(--amber),var(--amber2));
-            color:#0c0a09;font-weight:500;
-            border-bottom-right-radius:4px;
-        }
-        .bubble.sys{
-            align-self:flex-start;
-            background:var(--bg3);border:1px solid var(--border);
-            color:var(--t1);border-bottom-left-radius:4px;
-            font-size:12.5px;transition:all .4s;
-        }
+        .bubble.me{align-self:flex-end;background:linear-gradient(145deg,var(--amber),var(--amber2));color:#0c0a09;font-weight:500;border-bottom-right-radius:4px;}
+        .bubble.sys{align-self:flex-start;background:var(--bg3);border:1px solid var(--border);color:var(--t1);border-bottom-left-radius:4px;font-size:12.5px;}
 
         /* ── Input ── */
-        .input-zone{
-            padding:16px 22px;border-top:1px solid var(--border);
-            display:flex;gap:12px;align-items:flex-end;transition:border-color .4s;
-        }
-        .input-zone textarea{
-            flex:1;background:var(--input-bg);border:1px solid var(--border);
-            border-radius:14px;padding:13px 18px;
-            font-family:'Space Grotesk',sans-serif;font-size:13px;color:var(--t1);
-            resize:none;outline:none;min-height:46px;max-height:130px;
-            transition:all .25s;line-height:1.5;
-        }
-        .input-zone textarea::placeholder{color:var(--t3);font-style:italic}
+        .input-zone{padding:16px 22px;border-top:1px solid var(--border);display:flex;gap:12px;align-items:flex-end;}
+        .input-zone textarea{flex:1;background:var(--input-bg);border:1px solid var(--border);border-radius:14px;padding:13px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;color:var(--t1);resize:none;outline:none;min-height:46px;max-height:130px;transition:all .25s;line-height:1.5;}
         .input-zone textarea:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,158,11,.1)}
+        .send{height:46px;padding:0 24px;border:none;border-radius:14px;background:linear-gradient(145deg,var(--amber),var(--amber2));color:#0c0a09;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;letter-spacing:.5px;text-transform:uppercase;box-shadow:0 4px 20px rgba(245,158,11,.18);}
+        .send.off{opacity:.35;pointer-events:none;}
 
-        .send{
-            height:46px;padding:0 24px;border:none;border-radius:14px;
-            background:linear-gradient(145deg,var(--amber),var(--amber2));
-            color:#0c0a09;font-family:'DM Mono',monospace;font-size:12px;
-            font-weight:500;cursor:pointer;transition:all .25s;
-            white-space:nowrap;letter-spacing:.5px;text-transform:uppercase;
-            box-shadow:0 4px 20px rgba(245,158,11,.18);
-        }
-        .send:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(245,158,11,.28)}
-        .send:active{transform:translateY(0)}
-        .send.off{opacity:.35;pointer-events:none;transform:none;box-shadow:none}
-
-        /* ── History ── */
-        .history-section .glass{overflow:hidden}
-
-        .h-list{
-            max-height:360px;overflow-y:auto;overflow-x:hidden;
-            padding:16px 22px;display:flex;flex-direction:column;gap:12px;
-        }
-        .h-list::-webkit-scrollbar{width:3px}
-        .h-list::-webkit-scrollbar-track{background:transparent}
-        .h-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-
-        .h-empty{text-align:center;color:var(--t3);font-size:13px;padding:40px 0;transition:color .4s}
-        .h-empty p{font-family:'Instrument Serif',serif;font-style:italic;font-size:15px}
-
-        .h-entry{
-            background:var(--bg2);border:1px solid var(--border);border-radius:14px;
-            padding:16px 18px;animation:entryIn .45s cubic-bezier(.22,1,.36,1);
-            transition:all .4s;
-        }
-        .h-entry:hover{border-color:var(--border-h);background:var(--bg3)}
-        @keyframes entryIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
-
+        /* ── History & Manage ── */
+        .h-list, .m-list{max-height:360px;overflow-y:auto;padding:16px 22px;display:flex;flex-direction:column;gap:12px;}
+        .h-empty{text-align:center;color:var(--t3);font-size:13px;padding:40px 0;}
+        .h-entry, .m-item{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px 18px;transition:all .4s;}
+        .h-entry:hover, .m-item:hover{border-color:var(--border-h);background:var(--bg3)}
+        
         .h-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-        .h-badge{
-            font-family:'DM Mono',monospace;font-size:10px;font-weight:500;
-            padding:4px 12px;border-radius:8px;letter-spacing:.3px;
-        }
+        .h-badge{font-family:'DM Mono',monospace;font-size:10px;font-weight:500;padding:4px 12px;border-radius:8px;letter-spacing:.3px;}
         .h-badge.g{background:rgba(52,211,153,.1);color:var(--green)}
         .h-badge.b{background:rgba(56,189,248,.1);color:var(--blue)}
         .h-badge.r{background:rgba(251,113,133,.1);color:var(--red)}
-        .h-time{font-family:'DM Mono',monospace;font-size:9px;color:var(--t3);transition:color .4s}
-
-        .h-text{
-            font-size:12.5px;color:var(--t2);margin-bottom:14px;
-            line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-            transition:color .4s;
-        }
+        .h-time{font-family:'DM Mono',monospace;font-size:9px;color:var(--t3);}
+        .h-text{font-size:12.5px;color:var(--t2);margin-bottom:14px;line-height:1.45;}
 
         .h-bars{display:flex;gap:10px}
-        .h-bar{
-            flex:1;display:flex;align-items:center;gap:7px;
-            padding:7px 10px;border-radius:10px;background:var(--bg3);
-            transition:background .4s;
-        }
-        .h-bar-label{
-            font-family:'DM Mono',monospace;font-size:8px;color:var(--t3);
-            white-space:nowrap;font-weight:500;text-transform:uppercase;
-            letter-spacing:.6px;transition:color .4s;
-        }
-        .h-bar-track{flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden;transition:background .4s}
-        .h-bar-fill{height:100%;border-radius:2px;transition:width .7s cubic-bezier(.4,0,.2,1)}
+        .h-bar{flex:1;display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:10px;background:var(--bg3);}
+        .h-bar-label{font-family:'DM Mono',monospace;font-size:8px;color:var(--t3);font-weight:500;}
+        .h-bar-track{flex:1;height:3px;background:var(--border);border-radius:2px;}
+        .h-bar-fill{height:100%;border-radius:2px;transition:width .7s}
         .h-bar-fill.g{background:var(--green)}
         .h-bar-fill.b{background:var(--blue)}
         .h-bar-fill.r{background:var(--red)}
-        .h-bar-val{font-family:'DM Mono',monospace;font-size:9px;font-weight:500;min-width:28px;text-align:right}
-        .h-bar-val.g{color:var(--green)}
-        .h-bar-val.b{color:var(--blue)}
-        .h-bar-val.r{color:var(--red)}
+        .h-bar-val{font-family:'DM Mono',monospace;font-size:9px;font-weight:500;}
+        .h-bar-val.g{color:var(--green)} .h-bar-val.b{color:var(--blue)} .h-bar-val.r{color:var(--red)}
 
-        .h-tops{
-            margin-top:12px;padding-top:12px;border-top:1px solid var(--border);
-            display:flex;gap:12px;font-size:10px;transition:border-color .4s;
-        }
+        .h-tops{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:10px;}
         .h-tops>div{flex:1}
-        .h-tg{
-            font-family:'DM Mono',monospace;font-weight:600;margin-bottom:5px;
-            font-size:8px;text-transform:uppercase;letter-spacing:.9px;
-        }
-        .h-tg.g{color:var(--green)}
-        .h-tg.b{color:var(--blue)}
-        .h-tg.r{color:var(--red)}
-        .h-ti{
-            display:flex;justify-content:space-between;color:var(--t3);
-            padding:3px 0;gap:6px;transition:color .4s;font-family:'DM Mono',monospace;
-        }
-        .h-ti span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-
-        /* ── Decorative ── */
-        .divider{
-            width:100%;height:1px;margin:0;
-            background:linear-gradient(90deg,transparent,var(--border),transparent);
-        }
-
-        /* ── Responsive ── */
+        .h-tg{font-family:'DM Mono',monospace;font-weight:600;margin-bottom:5px;font-size:8px;}
+        .h-tg.g{color:var(--green)} .h-tg.b{color:var(--blue)} .h-tg.r{color:var(--red)}
+        .h-ti{display:flex;justify-content:space-between;color:var(--t3);padding:3px 0;gap:6px;}
+        
+        /* ── Manage Buttons ── */
+        .m-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;}
+        .m-btn { padding: 6px 12px; border-radius: 6px; font-family: 'DM Mono', monospace; font-size: 10px; cursor: pointer; border: 1px solid var(--border); background: var(--bg2); color: var(--t2); transition: 0.3s; }
+        .m-btn:hover { background: var(--bg3); border-color: var(--t3); color: var(--t1); }
+        .m-btn.btn-g:hover { border-color: var(--green); color: var(--green); }
+        .m-btn.btn-b:hover { border-color: var(--blue); color: var(--blue); }
+        .m-btn.btn-r:hover { border-color: var(--red); color: var(--red); }
+        .m-meta { font-size: 10px; color: var(--t3); font-family: 'DM Mono', monospace; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        
         @media(max-width:640px){
             .app{padding:24px 16px 40px}
             .h-bars,.h-tops{flex-direction:column}
-            .msgs{max-height:360px;min-height:200px}
-            .brand h1{font-size:19px}
         }
     </style>
 </head>
 <body>
 <div class="app">
 
-    <!-- Header -->
     <header class="header">
         <div class="brand">
             <div class="brand-icon">S</div>
@@ -289,53 +159,75 @@
         </div>
     </header>
 
-    <!-- Chat -->
-    <section class="chat-section">
-        <div class="glass" style="display:flex;flex-direction:column">
-            <div class="card-head">
-                <h3>Chat</h3>
-                <span class="tag" id="msgN">0</span>
-            </div>
-            <div class="msgs" id="msgs">
-                <div class="empty">
-                    <div class="ico">◈</div>
-                    <p>Nhập tin nhắn để phân loại</p>
+    <div class="tab-nav">
+        <button class="t-btn active" onclick="switchTab('view-chat', this)">💬 Chat Tester</button>
+        <button class="t-btn" onclick="switchTab('view-manage', this); loadManageHistory()">📂 Quản lý Dữ liệu</button>
+    </div>
+
+    <div id="view-chat" class="view-content active">
+        <section class="chat-section">
+            <div class="glass" style="display:flex;flex-direction:column">
+                <div class="card-head">
+                    <h3>Chat</h3>
+                    <span class="tag" id="msgN">0</span>
+                </div>
+                <div class="msgs" id="msgs">
+                    <div class="empty">
+                        <div class="ico">◈</div>
+                        <p>Nhập tin nhắn để phân loại</p>
+                    </div>
+                </div>
+                <div class="input-zone">
+                    <textarea id="inp" placeholder="Nhập tin nhắn..." rows="1"></textarea>
+                    <button class="send" id="btn" onclick="send()">Gửi</button>
                 </div>
             </div>
-            <div class="input-zone">
-                <textarea id="inp" placeholder="Nhập tin nhắn..." rows="1"></textarea>
-                <button class="send" id="btn" onclick="send()">Gửi</button>
-            </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- History -->
-    <section class="history-section">
-        <div class="glass">
-            <div class="card-head">
-                <h3>Lịch sử</h3>
-                <span class="tag" id="hN">0</span>
+        <section class="history-section">
+            <div class="glass">
+                <div class="card-head">
+                    <h3>Lịch sử Session</h3>
+                    <span class="tag" id="hN">0</span>
+                </div>
+                <div class="h-list" id="hList">
+                    <div class="h-empty"><p>Chưa có đánh giá nào</p></div>
+                </div>
             </div>
-            <div class="h-list" id="hList">
-                <div class="h-empty"><p>Chưa có đánh giá nào</p></div>
+        </section>
+    </div>
+
+    <div id="view-manage" class="view-content">
+        <section class="history-section">
+            <div class="glass">
+                <div class="card-head">
+                    <h3>Đánh giá lại hội thoại (Top 50 gần nhất)</h3>
+                    <button class="t-btn" onclick="loadManageHistory()" style="padding: 4px 10px; font-size: 9px;">🔄 Làm mới</button>
+                </div>
+                <div class="m-list" id="mList">
+                    <div class="h-empty"><p>Đang tải dữ liệu...</p></div>
+                </div>
             </div>
-        </div>
-    </section>
+        </section>
+    </div>
 
 </div>
 
 <script>
 let ws, H = [], N = 0, isLight = false;
-const LM = {
-    'Bình Thường': { c: 'g' },
-    'Crawl Data':  { c: 'b' },
-    'Tào Lao':     { c: 'r' }
-};
+const LM = { 'tao_lao': { c: 'r' }, 'binh_thuong': { c: 'g' }, 'crawl_data': { c: 'b' } };
 
 function toggleTheme() {
     isLight = !isLight;
     document.body.classList.toggle('light', isLight);
     document.getElementById('themeBtn').textContent = isLight ? '☾' : '☀';
+}
+
+function switchTab(viewId, btn) {
+    document.querySelectorAll('.view-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.t-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById(viewId).classList.add('active');
+    btn.classList.add('active');
 }
 
 function init() {
@@ -377,28 +269,47 @@ async function send() {
     btn.classList.add('off');
     btn.textContent = '…';
 
+    const wordCount = full.replace(/\n/g, ' ').trim().split(/\s+/).length;
+    if (wordCount <= 3) {
+        const s = document.createElement('div');
+        s.className = 'bubble sys';
+        s.innerHTML = `<span style="color:var(--t3)"><em>Đang chờ thêm ngữ cảnh... (mới có ${wordCount} từ)</em></span>`;
+        box.appendChild(s);
+        box.scrollTop = box.scrollHeight;
+        btn.classList.remove('off');
+        btn.textContent = 'Gửi';
+        return; 
+    }
+
     if (ws && ws.readyState === 1) {
         ws.send(full);
         const once = e => {
             const d = JSON.parse(e.data);
-            const sc = {
-                'Bình Thường': d.binh_thuong || 0,
-                'Crawl Data':  d.crawl_data  || 0,
-                'Tào Lao':     d.tao_lao     || 0
+            const calcAvg = (arr) => {
+                if (!arr || arr.length === 0) return 0;
+                const sum = arr.reduce((acc, curr) => acc + curr.score, 0);
+                return parseFloat((sum / arr.length).toFixed(1));
             };
+
+            const sc = {
+                'tao_lao': calcAvg(d.top?.tao_lao),
+                'crawl_data': calcAvg(d.top?.crawl_data),
+                'binh_thuong': calcAvg(d.top?.binh_thuong)
+            };
+
             const pred = Object.entries(sc).sort((a, b) => b[1] - a[1])[0];
             const lm = LM[pred[0]];
-            const col = pred[0] === 'Bình Thường' ? 'var(--green)'
-                      : pred[0] === 'Crawl Data'  ? 'var(--blue)'
-                      : 'var(--red)';
+            const labelNames = { 'binh_thuong': 'Bình Thường', 'crawl_data': 'Crawl Data', 'tao_lao': 'Tào Lao' };
+            const displayName = labelNames[pred[0]];
+            const col = pred[0] === 'binh_thuong' ? 'var(--green)' : pred[0] === 'crawl_data' ? 'var(--blue)' : 'var(--red)';
 
             const s = document.createElement('div');
             s.className = 'bubble sys';
-            s.innerHTML = `<strong style="color:${col}">${pred[0]}</strong> ${pred[1]}%`;
+            s.innerHTML = `<strong style="color:${col}">${displayName}</strong> ${pred[1]}%`;
             box.appendChild(s);
             box.scrollTop = box.scrollHeight;
 
-            addHist(full, d, pred, lm);
+            addHist(full, d, pred, lm, sc);
             btn.classList.remove('off');
             btn.textContent = 'Gửi';
             ws.removeEventListener('message', once);
@@ -415,59 +326,86 @@ async function send() {
     } catch (e) {}
 }
 
-function addHist(text, d, pred, lm) {
+function addHist(text, d, pred, lm, sc) {
     const el = document.getElementById('hList');
     const emp = el.querySelector('.h-empty');
     if (emp) emp.remove();
     document.getElementById('hN').textContent = ++N;
-
-    const now = new Date().toLocaleTimeString('vi-VN', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-    });
-    const bt = (d.top && d.top.binh_thuong) || [];
-    const cd = (d.top && d.top.crawl_data)  || [];
-    const tl = (d.top && d.top.tao_lao)     || [];
 
     const div = document.createElement('div');
     div.className = 'h-entry';
     div.innerHTML = `
         <div class="h-top">
             <span class="h-badge ${lm.c}">${pred[0]}</span>
-            <span class="h-time">${now}</span>
         </div>
-        <div class="h-text">${text}</div>
+        <div class="h-text">${text.replace(/\n/g, '<br>')}</div>
         <div class="h-bars">
-            <div class="h-bar">
-                <span class="h-bar-label">BT</span>
-                <div class="h-bar-track"><div class="h-bar-fill g" style="width:${d.binh_thuong || 0}%"></div></div>
-                <span class="h-bar-val g">${d.binh_thuong || 0}%</span>
-            </div>
-            <div class="h-bar">
-                <span class="h-bar-label">CD</span>
-                <div class="h-bar-track"><div class="h-bar-fill b" style="width:${d.crawl_data || 0}%"></div></div>
-                <span class="h-bar-val b">${d.crawl_data || 0}%</span>
-            </div>
-            <div class="h-bar">
-                <span class="h-bar-label">TL</span>
-                <div class="h-bar-track"><div class="h-bar-fill r" style="width:${d.tao_lao || 0}%"></div></div>
-                <span class="h-bar-val r">${d.tao_lao || 0}%</span>
-            </div>
-        </div>
-        <div class="h-tops">
-            <div>
-                <div class="h-tg g">Top BT</div>
-                ${bt.map(x => `<div class="h-ti"><span>${x.text}</span><span style="color:var(--green)">${x.score}%</span></div>`).join('')}
-            </div>
-            <div>
-                <div class="h-tg b">Top CD</div>
-                ${cd.map(x => `<div class="h-ti"><span>${x.text}</span><span style="color:var(--blue)">${x.score}%</span></div>`).join('')}
-            </div>
-            <div>
-                <div class="h-tg r">Top TL</div>
-                ${tl.map(x => `<div class="h-ti"><span>${x.text}</span><span style="color:var(--red)">${x.score}%</span></div>`).join('')}
-            </div>
+            <div class="h-bar"><span class="h-bar-label">BT</span><div class="h-bar-track"><div class="h-bar-fill g" style="width:${sc.binh_thuong || 0}%"></div></div></div>
+            <div class="h-bar"><span class="h-bar-label">CD</span><div class="h-bar-track"><div class="h-bar-fill b" style="width:${sc.crawl_data || 0}%"></div></div></div>
+            <div class="h-bar"><span class="h-bar-label">TL</span><div class="h-bar-track"><div class="h-bar-fill r" style="width:${sc.tao_lao || 0}%"></div></div></div>
         </div>`;
     el.insertBefore(div, el.firstChild);
+}
+
+// ---- MANAGE TAB LOGIC ----
+async function loadManageHistory() {
+    const list = document.getElementById('mList');
+    list.innerHTML = `<div class="h-empty"><p>Đang tải dữ liệu...</p></div>`;
+    try {
+        const res = await fetch('/api/history');
+        const data = await res.json();
+        
+        if (!data || data.length === 0) {
+            list.innerHTML = `<div class="h-empty"><p>Chưa có dữ liệu</p></div>`;
+            return;
+        }
+
+        list.innerHTML = '';
+        data.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = 'm-item';
+            div.id = `m-item-${index}`;
+            div.innerHTML = `
+                <div class="m-meta">
+                    <span>Dự đoán cũ: <strong>${item.predicted_label || 'N/A'}</strong></span>
+                    <span>${new Date(item.timestamp).toLocaleString('vi-VN')}</span>
+                </div>
+                <div class="h-text" style="color:var(--t1)">${item.full_conversation.replace(/\n/g, '<br>')}</div>
+                <div class="m-actions">
+                    <button class="m-btn btn-g" onclick="relabel('${encodeURIComponent(item.full_conversation)}', 'BINH_THUONG', 'm-item-${index}')">✅ Đánh dấu: Bình Thường</button>
+                    <button class="m-btn btn-b" onclick="relabel('${encodeURIComponent(item.full_conversation)}', 'CRAWL_DATA', 'm-item-${index}')">🤖 Đánh dấu: Crawl Data</button>
+                    <button class="m-btn btn-r" onclick="relabel('${encodeURIComponent(item.full_conversation)}', 'TAO_LAO', 'm-item-${index}')">❌ Đánh dấu: Tào Lao</button>
+                </div>
+            `;
+            list.appendChild(div);
+        });
+    } catch (e) {
+        list.innerHTML = `<div class="h-empty"><p style="color:var(--red)">Lỗi khi tải dữ liệu!</p></div>`;
+    }
+}
+
+async function relabel(encodedText, newLabel, elId) {
+    const text = decodeURIComponent(encodedText);
+    const btnBox = document.querySelector(`#${elId} .m-actions`);
+    btnBox.innerHTML = `<span style="font-size:11px; color:var(--amber);">Đang lưu vào Vector DB & File...</span>`;
+    
+    try {
+        const res = await fetch('/api/relabel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full_conversation: text, new_label: newLabel })
+        });
+        const data = await res.json();
+        
+        if (data.status === "ok") {
+            btnBox.innerHTML = `<span style="font-size:12px; color:var(--green); font-weight:500;">✓ Đã cập nhật nhãn <b>${newLabel}</b> thành công!</span>`;
+            setTimeout(() => document.getElementById(elId).style.display = 'none', 1500);
+        } else {
+            btnBox.innerHTML = `<span style="font-size:12px; color:var(--red);">Lỗi: ${data.error}</span>`;
+        }
+    } catch (e) {
+        btnBox.innerHTML = `<span style="font-size:12px; color:var(--red);">Lỗi kết nối Server</span>`;
+    }
 }
 
 document.getElementById('inp').addEventListener('keydown', e => {
