@@ -168,7 +168,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         for idx in top_indices:
                             text = ds['data'][idx]['conversation']
-                            short_text = text[:20] + "..." if len(text) > 20 else text
+                            short_text = text[:80] + "..." if len(text) > 80 else text
                             top_results[name].append({
                                 "text": short_text,
                                 "score": round(float(sims[idx]) * 100, 1)
@@ -213,30 +213,96 @@ async def submit_chat_message(data: ChatSubmit):
         return {"status": "skipped", "message": "Input quá ngắn."}
 
     formatted_lines = [f"Customer: {line.strip()}" for line in lines if line.strip()]
+    print(formatted_lines)
     formatted_full_conversation = "\n".join(formatted_lines)
     last_message = formatted_lines[-1] if formatted_lines else ""
 
-    # Tính toán score và label
+    # ==========================================
+    # 1. TÍNH ĐIỂM CENTROID (scores) - Trọng số 50/50
+    # ==========================================
     if len(formatted_lines) > 1:
-        _, scores_full = predict_3_class(formatted_full_conversation)
-        _, scores_last = predict_3_class(last_message)
-        scores = {
-            "tao_lao": 0.5 * scores_full.get("TAO_LAO", 0) + 0.5 * scores_last.get("TAO_LAO", 0),
-            "crawl_data": 0.5 * scores_full.get("CRAWL_DATA", 0) + 0.5 * scores_last.get("CRAWL_DATA", 0),
-            "binh_thuong": 0.5 * scores_full.get("BINH_THUONG", 0) + 0.5 * scores_last.get("BINH_THUONG", 0)
+        _, c_scores_full = predict_3_class(formatted_full_conversation)
+        _, c_scores_last = predict_3_class(last_message)
+        scores_centroid = {
+            "tao_lao": round(0.5 * c_scores_full.get("TAO_LAO", 0) + 0.5 * c_scores_last.get("TAO_LAO", 0), 2),
+            "crawl_data": round(0.5 * c_scores_full.get("CRAWL_DATA", 0) + 0.5 * c_scores_last.get("CRAWL_DATA", 0), 2),
+            "binh_thuong": round(0.5 * c_scores_full.get("BINH_THUONG", 0) + 0.5 * c_scores_last.get("BINH_THUONG", 0), 2)
         }
-        predicted_label = max(scores, key=scores.get)
     else:
-        raw_pred, raw_scores = predict_3_class(formatted_full_conversation)
-        scores = {"tao_lao": raw_scores.get("TAO_LAO", 0), "crawl_data": raw_scores.get("CRAWL_DATA", 0), "binh_thuong": raw_scores.get("BINH_THUONG", 0)}
-        predicted_label = raw_pred.lower()
+        _, c_scores_raw = predict_3_class(formatted_full_conversation)
+        scores_centroid = {
+            "tao_lao": round(c_scores_raw.get("TAO_LAO", 0), 2),
+            "crawl_data": round(c_scores_raw.get("CRAWL_DATA", 0), 2),
+            "binh_thuong": round(c_scores_raw.get("BINH_THUONG", 0), 2)
+        }
 
+    # ==========================================
+    # 2. TÍNH ĐIỂM SIMILARITY (Trung bình Top-2)
+    # ==========================================
+    query_emb_full = np.array(embeddings.embed_query(formatted_full_conversation))
+    norm_full = np.linalg.norm(query_emb_full)
+    norm_query_full = query_emb_full / norm_full if norm_full > 0 else query_emb_full
+    
+    if len(formatted_lines) > 1:
+        query_emb_last = np.array(embeddings.embed_query(last_message))
+        norm_last = np.linalg.norm(query_emb_last)
+        norm_query_last = query_emb_last / norm_last if norm_last > 0 else query_emb_last
+    else:
+        norm_query_last = norm_query_full
+
+    scores_similar = {"tao_lao": 0.0, "crawl_data": 0.0, "binh_thuong": 0.0}
+
+    try:
+        for name, ds in datasets.items():
+            if ds['embeddings']:
+                mat = np.array(ds['embeddings'])
+                norms = np.linalg.norm(mat, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1, norms)
+                norm_mat = mat / norms
+                
+                sims_full = np.dot(norm_mat, norm_query_full)
+                
+                if len(formatted_lines) > 1:
+                    sims_last = np.dot(norm_mat, norm_query_last)
+                    sims = 0.5 * sims_full + 0.5 * sims_last
+                else:
+                    sims = sims_full
+                
+                # Lấy Top 2 và tính trung bình
+                top_k = min(2, len(sims))
+                if top_k > 0:
+                    top_scores = np.sort(sims)[-top_k:]
+                    avg_score = float(np.mean(top_scores)) * 100
+                    scores_similar[name] = round(avg_score, 2)
+    except Exception as e:
+        print(f"❌ Lỗi khi tính điểm Similarity: {e}")
+
+    # Chốt dự đoán dựa trên điểm Similarity
+    predicted_label = max(scores_similar, key=scores_similar.get) if any(scores_similar.values()) else "unknown"
+
+    # ==========================================
+    # 3. TÍNH XÁC SUẤT TÍCH LŨY (Cumulative Probability)
+    # ==========================================
+    cumulative_top2 = 0.0
+    probs_dict = {"tao_lao": 0.0, "crawl_data": 0.0, "binh_thuong": 0.0}
+    
+    total_sim_score = sum(scores_similar.values())
+    if total_sim_score > 0:
+        # Chuẩn hóa về thang 100% (Probability Distribution)
+        probs_dict = {k: round((v / total_sim_score) * 100, 2) for k, v in scores_similar.items()}
+        # Lấy 2 xác suất cao nhất cộng lại
+        sorted_probs = sorted(probs_dict.values(), reverse=True)
+        if len(sorted_probs) >= 2:
+            cumulative_top2 = round(sorted_probs[0] + sorted_probs[1], 2)
+
+    # ==========================================
+    # 4. GHI LOG & DATABASE
+    # ==========================================
     log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "user_submitted_messages.jsonl")
     
     target_id = data.id
     all_entries = []
     
-    # Đọc file để kiểm tra ID hoặc tạo ID mới
     if os.path.exists(log_file):
         with open(log_file, "r", encoding="utf-8") as f:
             for line in f:
@@ -244,20 +310,22 @@ async def submit_chat_message(data: ChatSubmit):
                 try:
                     all_entries.append(json.loads(line))
                 except Exception:
-                    pass # Bỏ qua các dòng rác/lỗi do test cũ để lại
+                    pass
 
-    # LOGIC CẬP NHẬT HOẶC THÊM MỚI (An toàn khi lấy Max ID)
+    # Tạo JSON Entry với cấu trúc siêu đầy đủ
     new_entry = {
         "id": target_id if target_id else (max([int(e.get('id') or 0) for e in all_entries] + [0]) + 1),
-        "timestamp": datetime.utcnow().isoformat(),
-        "full_conversation": formatted_full_conversation,
         "predicted_label": predicted_label,
-        "scores": scores,
-        "is_reviewed": False  # <--- THÊM DÒNG NÀY: Mặc định chưa đánh giá
+        "scores": scores_centroid,            # 1. Điểm Centroid 50/50
+        "scores_similar": scores_similar,     # 2. Điểm Similarity Top-2
+        "probabilities": probs_dict,          # 3. Xác suất phân bổ (%)
+        "cumulative_top2_prob": cumulative_top2, # 4. Xác suất tích lũy Top 2
+        "is_reviewed": False,                 
+        "full_conversation": formatted_full_conversation,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
     if target_id:
-        # Tìm và thay thế entry cũ có cùng ID
         found = False
         for i, entry in enumerate(all_entries):
             if entry.get("id") == target_id:
@@ -268,18 +336,14 @@ async def submit_chat_message(data: ChatSubmit):
     else:
         all_entries.append(new_entry)
 
-    # Ghi lại toàn bộ file JSONL (Đảm bảo ID cũ được cập nhật nội dung mới nhất)
     with open(log_file, "w", encoding="utf-8") as f:
         for entry in all_entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Cập nhật SQLite Vector: Xóa vector cũ của ID này và chèn bản mới nhất
     try:
-        # Nếu đang update chat cũ thì mới xóa vector cũ (Thêm dấu cách sau ID để tránh xóa nhầm 1 thành 10, 11)
         if target_id is not None:
             db_conn.execute("DELETE FROM history_vectors WHERE text LIKE ?", (f"%ID:{target_id} %",)) 
             
-        # Thêm vector mới với format có ID rõ ràng
         doc = Document(
             page_content=f"[{predicted_label}] ID:{new_entry['id']} {formatted_full_conversation}", 
             metadata={"label": predicted_label, "id": new_entry['id']}

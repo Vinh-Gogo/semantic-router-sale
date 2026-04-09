@@ -4,6 +4,45 @@ import numpy as np
 import requests
 
 from langchain_openai import OpenAIEmbeddings
+
+class FPTEmbeddings:
+    def __init__(self, api_key, model="multilingual-e5-large"):
+        self.url = "https://mkp-api.fptcloud.com/v1/embeddings"
+        self.api_key = api_key
+        self.model = model
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+    def embed_documents(self, texts):
+        embeddings = []
+
+        for text in texts:  # ⚠️ gửi từng câu để tránh 422
+            res = requests.post(
+                self.url,
+                headers=self.headers,
+                json={
+                    "model": self.model,
+                    "input": text
+                }
+            )
+
+            if res.status_code != 200:
+                raise Exception(f"API Error: {res.status_code} - {res.text}")
+
+            data = res.json()
+
+            try:
+                embeddings.append(data["data"][0]["embedding"])
+            except Exception:
+                raise Exception(f"Bad response format: {data}")
+
+        return embeddings
+
+    def embed_query(self, text):
+        return self.embed_documents([text])[0]
+    
 from pydantic import SecretStr
 from dotenv import load_dotenv
 
@@ -19,12 +58,20 @@ except Exception:
     model_id = os.getenv("OPENAI_API_MODEL_NAME_EMBED")
     print(f"⚠️ Using fallback model: {model_id}")
 
+# embeddings = FPTEmbeddings(
+#     api_key="",
+#     model=model_id
+# )
+
 embeddings = OpenAIEmbeddings(
-    model=model_id,
-    base_url=os.getenv("OPENAI_BASE_URL_EMBED"),
-    api_key=SecretStr(os.getenv("OPENAI_API_KEY_EMBED", "text")),
-    check_embedding_ctx_length=False,
+    model="qwen/qwen3-embedding-8b",
+    # base_url=os.getenv("OPENAI_BASE_URL_EMBED"),
+    # api_key=SecretStr(os.getenv("OPENAI_API_KEY_EMBED", "text")),
+    base_url="https://api.novita.ai/openai/v1",
+    api_key=SecretStr(os.getenv("NOVITA_API_KEY", "text")),
 )
+
+# print(len(embeddings.embed_query("Test embedding")))  # Test kết nối
 
 # Cache cho 3 lớp: {file_path: (centroid_vector, norm, mtime)}
 _centroid_cache = {}

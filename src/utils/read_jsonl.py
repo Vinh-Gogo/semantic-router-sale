@@ -36,7 +36,6 @@ def read_jsonl(file_path: str, deduplicate: bool = True):
                 # Chỉ giữ lại các trường cần thiết
                 clean_record = {
                     'id': record.get('id'),
-                    'predicted_label': record.get('predicted_label'),
                     'conversation': conv_text
                 }
                 
@@ -95,9 +94,9 @@ if __name__ == "__main__":
     print("🔧 Công cụ sửa id và đọc file jsonl\n")
     
     # Uncomment dòng nào bạn muốn chạy
-    # fix_ids_and_save("data/tao-lao.jsonl")
-    # fix_ids_and_save("data/binh-thuong.jsonl")
-    # fix_ids_and_save("data/crawl-data.jsonl")
+    fix_ids_and_save("data/tao-lao.jsonl")
+    fix_ids_and_save("data/binh-thuong.jsonl")
+    fix_ids_and_save("data/crawl-data.jsonl")
     
     # Test đọc dữ liệu
     # data = read_jsonl("data/tao-lao.jsonl")
