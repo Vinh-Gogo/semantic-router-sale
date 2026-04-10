@@ -1,130 +1,92 @@
-import time
 import json
 import os
 import numpy as np
+from datetime import datetime
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore') # Ẩn các warning không cần thiết
 
 from src.utils.read_jsonl import read_jsonl
-
-import os
-import json
-import numpy as np
-import requests
-    
-from pydantic import SecretStr
-from langchain_openai import OpenAIEmbeddings
-
-from dotenv import load_dotenv
-load_dotenv()
-
-embeddings = OpenAIEmbeddings(
-    model="Qwen/Qwen3-Embedding-0.6B",
-    base_url=os.getenv("OPENAI_BASE_URL_EMBED"),
-    api_key=SecretStr(os.getenv("OPENAI_API_KEY_EMBED", "text")),
-    # base_url="https://api.novita.ai/openai",
-    # api_key=SecretStr(os.getenv("NOVITA_API_KEY", "text")),
-    check_embedding_ctx_length=False,
-    chunk_size=32
-)
-
-def embed_with_retry(texts):
-    """Hàm hỗ trợ nhúng danh sách văn bản với cơ chế đợi nếu gặp giới hạn rate limit"""
-    try:
-        # Nhờ chunk_size=32 đã cài ở turn trước, 
-        # hàm này sẽ tự động chia nhỏ texts thành các batch 32.
-        return embeddings.embed_documents(texts)
-    except Exception as e:
-        if "429" in str(e):
-            print("⏳ Chạm giới hạn Rate Limit. Đang nghỉ 30s...")
-            time.sleep(3)
-            return embeddings.embed_documents(texts)
-        raise e
+from src.test.test import embeddings, predict_3_class
 
 def run_auto_test():
     base_dir = os.path.dirname(__file__)
     test_file = os.path.join(base_dir, "data", "test_cases.jsonl")
-    results_file = os.path.join(base_dir, "data", "test_results.jsonl")
+    results_file = os.path.join(base_dir, "data", "test_results.jsonl") # File xuất kết quả
     
-    if not os.path.exists(test_file): return
+    if not os.path.exists(test_file):
+        print("❌ Không tìm thấy file data/test_cases.jsonl")
+        return
 
-    # 1. LOAD DATASET (Giữ nguyên logic cũ nhưng dùng embed_with_retry)
+    # 1. LOAD VÀ NHÚNG DATASET
     print("🔄 Đang nạp dữ liệu từ Knowledge Base...")
     datasets = {
-        "tao_lao": {"path": os.path.join(base_dir, "data/tao-lao.jsonl"), "embeddings": None},
-        "crawl_data": {"path": os.path.join(base_dir, "data/crawl-data.jsonl"), "embeddings": None},
-        "binh_thuong": {"path": os.path.join(base_dir, "data/binh-thuong.jsonl"), "embeddings": None}
+        "tao_lao": {"path": os.path.join(base_dir, "data/tao-lao.jsonl"), "data": [], "embeddings": None},
+        "crawl_data": {"path": os.path.join(base_dir, "data/crawl-data.jsonl"), "data": [], "embeddings": None},
+        "binh_thuong": {"path": os.path.join(base_dir, "data/binh-thuong.jsonl"), "data": [], "embeddings": None}
     }
     
     for name, ds in datasets.items():
         if os.path.exists(ds['path']):
-            data = read_jsonl(ds['path'], deduplicate=True)
-            msgs = [item['conversation'] for item in data if item['conversation'].strip()]
-            if msgs:
-                ds['embeddings'] = embed_with_retry(msgs)
-
-    # 2. GOM TOÀN BỘ TEST CASES ĐỂ NHÚNG 1 LẦN (BATCHING)
-    print("📦 Đang gom batch Test Cases để tối ưu API...")
-    test_items = []
-    all_texts_to_embed = []
+            ds['data'] = read_jsonl(ds['path'], deduplicate=True)
+            messages = [item['conversation'] for item in ds['data'] if item['conversation'].strip()]
+            if messages:
+                ds['embeddings'] = embeddings.embed_documents(messages)
     
-    with open(test_file, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                item = json.loads(line)
-                chat_lines = [l.strip() for l in item["conversation"].split('\n') if l.strip()]
-                if not chat_lines: continue
-                
-                full_text = "\n".join(chat_lines)
-                last_msg = chat_lines[-1]
-                
-                # Lưu index để tí nữa map lại
-                item['_full_idx'] = len(all_texts_to_embed)
-                all_texts_to_embed.append(full_text)
-                
-                item['_last_idx'] = len(all_texts_to_embed)
-                all_texts_to_embed.append(last_msg)
-                
-                item['_chat_lines'] = chat_lines
-                test_items.append(item)
+    print("✅ Đã nạp xong Vector Database. Bắt đầu chạy Test Cases...\n")
 
-    # Nhúng toàn bộ 1 lần (API sẽ chỉ tốn (tổng_văn_vản / 32) requests)
-    print(f"📡 Đang gửi {len(all_texts_to_embed)} chuỗi văn bản lên Server...")
-    all_vectors = np.array(embed_with_retry(all_texts_to_embed))
-    
-    # Chuẩn hóa toàn bộ vector nhúng
-    norms = np.linalg.norm(all_vectors, axis=1, keepdims=True)
-    all_vectors_norm = all_vectors / np.where(norms == 0, 1, norms)
-
-    # 3. CHẠY CHẤM ĐIỂM (Không gọi API nữa, chỉ tính toán CPU)
-    print("✅ Bắt đầu so khớp vector...")
+    # 2. CHUẨN BỊ CHẤM ĐIỂM
     labels = ["binh_thuong", "crawl_data", "tao_lao"]
     matrix = {actual: {pred: 0 for pred in labels} for actual in labels}
     
-    # ---> BỔ SUNG KHAI BÁO BIẾN Ở ĐÂY <---
     total_cases = 0
     correct_cases = 0
     total_cumulative = 0
-    results_log = []
-    # ------------------------------------
+    results_log = [] # Mảng lưu dữ liệu để xuất file
 
-    for idx, item in enumerate(test_items, 1):
+    with open(test_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    print(f"{'#':<3} | {'KỲ VỌNG':<12} | {'AI DỰ ĐOÁN':<12} | {'CUMULATIVE':<10} | {'STATUS'}")
+    print("-" * 65)
+
+    # 3. CHẠY TỪNG TEST CASE
+    for idx, line in enumerate(lines, 1):
+        if not line.strip(): continue
+        item = json.loads(line)
+        
         expected_label = item["expected_label"]
         conversation = item["conversation"]
         
-        q_norm_full = all_vectors_norm[item['_full_idx']]
-        q_norm_last = all_vectors_norm[item['_last_idx']]
+        chat_lines = conversation.split('\n')
+        formatted_lines = [l.strip() for l in chat_lines if l.strip()]
+        if not formatted_lines: continue
         
-        scores_similar = {name: 0.0 for name in datasets.keys()}
+        full_text = "\n".join(formatted_lines)
+        last_msg = formatted_lines[-1]
+        
+        # Tính toán vector similarity
+        q_emb_full = np.array(embeddings.embed_query(full_text))
+        n_full = np.linalg.norm(q_emb_full)
+        q_norm_full = q_emb_full / n_full if n_full > 0 else q_emb_full
+        
+        if len(formatted_lines) > 1:
+            q_emb_last = np.array(embeddings.embed_query(last_msg))
+            n_last = np.linalg.norm(q_emb_last)
+            q_norm_last = q_emb_last / n_last if n_last > 0 else q_emb_last
+        else:
+            q_norm_last = q_norm_full
+
+        scores_similar = {"tao_lao": 0.0, "crawl_data": 0.0, "binh_thuong": 0.0}
+        
         for name, ds in datasets.items():
-            if ds['embeddings'] is not None:
+            if ds['embeddings']:
                 mat = np.array(ds['embeddings'])
-                # Chuẩn hóa database vector
-                db_norms = np.linalg.norm(mat, axis=1, keepdims=True)
-                norm_mat = mat / np.where(db_norms == 0, 1, db_norms)
+                norms = np.linalg.norm(mat, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1, norms)
+                norm_mat = mat / norms
                 
                 sims_full = np.dot(norm_mat, q_norm_full)
-                sims_last = np.dot(norm_mat, q_norm_last)
+                sims_last = np.dot(norm_mat, q_norm_last) if len(formatted_lines) > 1 else sims_full
                 
                 sims = 0.5 * sims_full + 0.5 * sims_last
                 top_k = min(2, len(sims))

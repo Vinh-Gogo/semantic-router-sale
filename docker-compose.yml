@@ -1,0 +1,90 @@
+services:
+  # Python API gửi mail (cho bên ngoài gọi)
+  python-mailer:
+    build: ./src/chatwoot_mailer
+    container_name: python_mailer_service
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - SMTP_SERVER=smtp.gmail.com
+      - SMTP_PORT=587
+    restart: always
+
+  # Chatwoot Web
+  chatwoot-web:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot_app
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - DATABASE_URL=postgresql://postgres:password@chatwoot-db:5432/chatwoot
+      - REDIS_URL=redis://chatwoot-redis:6379/0
+      - MAILER_SENDER_EMAIL=${SMTP_USER}
+      - SMTP_ADDRESS=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_DOMAIN=gmail.com
+      - SMTP_USERNAME=${SMTP_USER}        # Quan trọng: phải là SMTP_USERNAME
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_AUTHENTICATION=login
+      - SMTP_ENABLE_STARTTLS_AUTO=true
+      - SMTP_OPENSSL_VERIFY_MODE=none
+      - RAILS_ENV=production
+    depends_on:
+      - chatwoot-db
+      - chatwoot-redis
+    restart: always
+    command: bundle exec rails s -p 3000 -b 0.0.0.0
+
+  # Worker gửi mail background (Không có cái này là mail không gửi được)
+  chatwoot-worker:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot_worker
+    env_file:
+      - .env
+    environment:
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - DATABASE_URL=postgresql://postgres:password@chatwoot-db:5432/chatwoot
+      - REDIS_URL=redis://chatwoot-redis:6379/0
+      - MAILER_SENDER_EMAIL=${SMTP_USER}
+      - SMTP_ADDRESS=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_DOMAIN=gmail.com
+      - SMTP_USERNAME=${SMTP_USER}        # Quan trọng: phải là SMTP_USERNAME
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_AUTHENTICATION=login
+      - SMTP_ENABLE_STARTTLS_AUTO=true
+      - SMTP_OPENSSL_VERIFY_MODE=none
+      - RAILS_ENV=production
+    depends_on:
+      - chatwoot-db
+      - chatwoot-redis
+    restart: always
+    command: bundle exec sidekiq
+
+  # Database (phải dùng pgvector, không phải postgres thường)
+  chatwoot-db:
+    image: pgvector/pgvector:pg16
+    container_name: chatwoot_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=chatwoot
+    volumes:
+      - chatwoot-db-data:/var/lib/postgresql/data
+    restart: always
+
+  # Redis
+  chatwoot-redis:
+    image: redis:7-alpine
+    container_name: chatwoot_redis
+    restart: always
+
+volumes:
+  chatwoot-db-data:

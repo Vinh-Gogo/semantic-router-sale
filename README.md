@@ -133,6 +133,43 @@ Quy mô dữ liệu (Dataset Size) chia theo 3 giai đoạn như sau:
 * **Mức xuất sắc (Production Scale - tự động hoàn toàn): Trên 5.000 mẫu/nhãn.**
   * Lúc này, bạn có thể tự tin áp dụng luật *Xác suất tích lũy > 95%* để hệ thống tự động bypass mà con người không cần phải review lại bất kỳ tin nhắn nào.
 
+## Chạy docker
+
+```bash
+# 1. Tạo thư mục cho Python Mailer nếu chưa có
+mkdir -p src/chatwoot_mailer
+
+# 2. Chạy tất cả
+docker-compose down -v --remove-orphans  # Dọn sạch nếu có lỗi cũ
+docker-compose up -d
+
+# 3. Đợi khởi tạo (2 phút cho lần đầu)
+sleep 120
+
+# 4. Kiểm tra tất cả container chạy chưa
+docker ps
+
+# 5. (Chỉ chạy 1 lần đầu) Tạo tài khoản admin mẫu
+docker exec -it chatwoot_app bundle exec rails db:seed
+```
+
+Sau đó truy cập: **http://localhost:3000/app/auth/login**
+
+**Tài khoản mặc định sau seed:**
+- Email: `admin@example.com`
+- Password: `Password1!`
+
+Hoặc vào **http://localhost:3000/app/auth/signup** để tạo mới.
+
+## Gửi mail cho Sale
+
+1. Vào Chatwoot UI: http://localhost:3000
+2. Settings → Agents → Add Agent
+3. Email: `s8230201@gmail.com` → Tick "Send email invitation"
+4. Sale sẽ nhận mail từ `lea26464@gmail.com` để đặt mật khẩu
+
+**Paste log nếu vẫn lỗi!**
+
 ## *Copyright Notice*
 
 ```plain

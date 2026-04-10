@@ -2,12 +2,8 @@ import os
 import json
 import numpy as np
 import requests
-    
-from pydantic import SecretStr
-from langchain_openai import OpenAIEmbeddings
 
-from dotenv import load_dotenv
-load_dotenv()
+from langchain_openai import OpenAIEmbeddings
 
 class FPTEmbeddings:
     def __init__(self, api_key, model="multilingual-e5-large"):
@@ -46,31 +42,37 @@ class FPTEmbeddings:
 
     def embed_query(self, text):
         return self.embed_documents([text])[0]
+    
+from pydantic import SecretStr
+from dotenv import load_dotenv
 
+load_dotenv()
 
-# # Config
-# base_url = os.getenv("OPENAI_BASE_URL_EMBED")
-# try:
-#     resp = requests.get(f"{base_url}/models", timeout=5)
-#     model_id = resp.json()["data"][0]["id"]
-#     print(f"🔍 Auto-detected model: {model_id}")
-# except Exception:
-#     model_id = os.getenv("OPENAI_API_MODEL_NAME_EMBED")
-#     print(f"⚠️ Using fallback model: {model_id}")
+# Config
+base_url = os.getenv("OPENAI_BASE_URL_EMBED")
+try:
+    resp = requests.get(f"{base_url}/models", timeout=5)
+    model_id = resp.json()["data"][0]["id"]
+    print(f"🔍 Auto-detected model: {model_id}")
+except Exception:
+    model_id = os.getenv("OPENAI_API_MODEL_NAME_EMBED")
+    print(f"⚠️ Using fallback model: {model_id}")
 
 # embeddings = FPTEmbeddings(
 #     api_key="",
 #     model=model_id
 # )
 
+
 embeddings = OpenAIEmbeddings(
-    model="Qwen/Qwen3-Embedding-0.6B",
-    base_url=os.getenv("OPENAI_BASE_URL_EMBED"),
-    api_key=SecretStr(os.getenv("OPENAI_API_KEY_EMBED", "text")),
-    # base_url="https://api.novita.ai/openai",
-    # api_key=SecretStr(os.getenv("NOVITA_API_KEY", "text")),
+    model="qwen/qwen3-embedding-8b",
+    # base_url=os.getenv("OPENAI_BASE_URL_EMBED"),
+    # api_key=SecretStr(os.getenv("OPENAI_API_KEY_EMBED", "text")),
+    base_url="https://api.novita.ai/openai",
+    api_key=SecretStr(os.getenv("NOVITA_API_KEY", "text")),
     check_embedding_ctx_length=False,
     chunk_size=32
+    
 )
 
 # print(len(embeddings.embed_query("Test embedding")))  # Test kết nối
@@ -91,6 +93,69 @@ def read_jsonl(file_path: str):
                 except json.JSONDecodeError:
                     continue
     return data
+
+# def get_centroid(label, file_path, outlier_percentile=10):
+#     """
+#     Tính vector đại diện tối ưu bằng cách loại bỏ nhiễu và outliers.
+#     outlier_percentile: % những câu 'lạc quẻ' nhất sẽ bị loại bỏ (mặc định 10%).
+#     """
+#     global _centroid_cache
+    
+#     current_mtime = os.path.getmtime(file_path)
+#     if label in _centroid_cache:
+#         cached_vec, cached_mtime = _centroid_cache[label]
+#         if cached_mtime == current_mtime:
+#             return cached_vec
+
+#     print(f"🚀 Đang tinh chỉnh Vector đại diện cho lớp: {label}...")
+    
+#     texts = []
+#     with open(file_path, "r", encoding="utf-8") as f:
+#         for line in f:
+#             if not line.strip(): continue
+#             try:
+#                 record = json.loads(line)
+#                 text = record.get("conversation", "").lower().strip()
+                
+#                 # CẢI TIẾN 1: Lọc dữ liệu thô
+#                 # Loại bỏ câu quá ngắn (nhiễu) vì chúng không đủ thông tin ngữ nghĩa
+#                 if len(text.split()) > 3: 
+#                     texts.append(text)
+#             except: continue
+
+#     if not texts: 
+#         return np.zeros(1024)
+
+#     # Nhúng văn bản
+#     raw_vecs = np.array(embeddings.embed_documents(texts))
+    
+#     # CẢI TIẾN 2: Chuẩn hóa Unit Vector trước khi xử lý
+#     norms = np.linalg.norm(raw_vecs, axis=1, keepdims=True)
+#     matrix = raw_vecs / np.where(norms == 0, 1, norms)
+
+#     # CẢI TIẾN 3: Loại bỏ Outliers (Những câu nằm quá xa tâm điểm)
+#     if len(matrix) > 5:  # Chỉ lọc nếu có đủ dữ liệu
+#         # Tính tâm tạm thời
+#         initial_centroid = np.mean(matrix, axis=0)
+#         # Tính khoảng cách Cosine của từng câu so với tâm này
+#         # (Vì đã chuẩn hóa nên khoảng cách tỉ lệ thuận với hiệu vector)
+#         distances = np.linalg.norm(matrix - initial_centroid, axis=1)
+        
+#         # Xác định ngưỡng (ví dụ: loại bỏ 10% xa nhất)
+#         threshold = np.percentile(distances, 100 - outlier_percentile)
+#         filtered_matrix = matrix[distances <= threshold]
+        
+#         print(f"   ↳ Đã loại bỏ {len(matrix) - len(filtered_matrix)} câu nhiễu.")
+#     else:
+#         filtered_matrix = matrix
+
+#     # CẢI TIẾN 4: Tính Centroid cuối cùng
+#     centroid = np.mean(filtered_matrix, axis=0)
+#     # Chuẩn hóa lại lần cuối để đảm bảo độ dài bằng 1
+#     centroid = centroid / (np.linalg.norm(centroid) + 1e-9)
+    
+#     _centroid_cache[label] = (centroid, current_mtime)
+#     return centroid
 
 def get_centroid(file_path: str):
     """Lấy centroid cho một file, có cache"""
@@ -187,6 +252,30 @@ def predict_3_class(input_text: str):
 
     # 4. Lấy Top-1 cao nhất
     predicted_label = max(scores, key=scores.get)
+    
+    return predicted_label, scores
+
+def predict_3_class(input_text: str):
+    if not input_text or not input_text.strip() or classifier is None:
+        return "BINH_THUONG", {}
+
+    # 🔥 FIX 1: Chuẩn hóa y hệt lúc Train
+    # Giả sử anh đã có hàm normalize_vnese, hãy gọi nó. Nếu chưa, ít nhất phải .lower()
+    clean_text = input_text.lower().strip()
+    # clean_text = normalize_vnese(clean_text) # Gọi nếu anh có hàm này
+    
+    # 2. Nhúng câu text đã làm sạch
+    input_vec = np.array(embeddings.embed_query(clean_text)).reshape(1, -1)
+    
+    probabilities = classifier.predict_proba(input_vec)[0]
+    scores = {label: round(prob * 100, 2) for label, prob in zip(classifier.classes_, probabilities)}
+    
+    max_prob = max(probabilities)
+    predicted_label = classifier.classes_[np.argmax(probabilities)]
+    
+    # Nếu AI không đủ tự tin (60%), trả về BINH_THUONG để an toàn
+    if max_prob < CONFIDENCE_THRESHOLD:
+        return "BINH_THUONG", scores
     
     return predicted_label, scores
 
